@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"fmt"
 	"sync"
 	"wiscdb/y"
 )
@@ -22,11 +23,11 @@ type Item struct {
 }
 
 func (item *Item) String() string {
-	return ""
+	return fmt.Sprintf("Key=%q, version=%d, meta=%x", item.Key(), item.Version(), item.meta)
 }
 
 func (item *Item) Key() []byte {
-	return nil
+	return item.key
 }
 
 func (item *Item) KeyCopy(dst []byte) []byte {
@@ -45,4 +46,29 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	return nil, func() {
 
 	}, nil
+}
+
+func (item *Item) ExpiredAt() uint64 {
+	return 0
+}
+
+func (item *Item) UserMeta() byte {
+	return 0
+}
+func (item *Item) DiscardEarlierVersion() bool {
+	return false
+}
+func (item *Item) KeySize() int64 {
+	return 0
+}
+func (item *Item) ValueSize() int64 {
+	return 0
+}
+
+func (item *Item) EstimatedSize() int64 {
+	return 0
+}
+
+func (item *Item) ValueCopy(dst []byte) ([]byte, error) {
+	return nil, nil
 }
