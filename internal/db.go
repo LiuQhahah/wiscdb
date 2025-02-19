@@ -79,3 +79,17 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 func (db *DB) valueThreshold() int64 {
 	return 0
 }
+
+func (db *DB) newStream() *Stream {
+	return &Stream{}
+}
+
+func (db *DB) NewStream() *Stream {
+	return db.newStream()
+}
+
+func (db *DB) NewStreamAt(readTs uint64) *Stream {
+	stream := db.newStream()
+	stream.readTs = readTs
+	return stream
+}
