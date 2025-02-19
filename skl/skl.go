@@ -7,6 +7,11 @@ import (
 	"wiscdb/y"
 )
 
+const (
+	offsetSize = int(unsafe.Sizeof(uint32(0)))
+	nodeAlign  = int(unsafe.Sizeof(uint64(0))) - 1
+)
+
 type SkipList struct {
 	height  atomic.Int32
 	head    *node
@@ -32,6 +37,45 @@ type node struct {
 type Arena struct {
 	n   atomic.Uint32
 	buf []byte
+}
+
+// return the value of n
+func (s *Arena) size() int64 {
+	return int64(s.n.Load())
+}
+func newArena(n int64) *Arena {
+	out := &Arena{
+		buf: make([]byte, n),
+	}
+	out.n.Store(1)
+	return out
+}
+func (s *Arena) putNode(height int) uint32 {
+	return 0
+}
+
+func (s *Arena) putVal(v y.ValueStruct) uint32 {
+	return 0
+}
+
+func (s *Arena) putKey(key []byte) uint32 {
+	return 0
+}
+
+func (s *Arena) getNode(offset uint32) *node {
+	return &node{}
+}
+
+func (s *Arena) getKey(offset uint32, size uint16) []byte {
+	return nil
+}
+
+func (s *Arena) getVal(offset uint32, size uint32) (ret y.ValueStruct) {
+	return y.ValueStruct{}
+}
+
+func (s *Arena) getNodeOffset(nd *node) uint32 {
+	return 0
 }
 
 func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
