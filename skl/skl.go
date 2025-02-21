@@ -54,12 +54,21 @@ func (s *Arena) putNode(height int) uint32 {
 	return 0
 }
 
+// 将v写到v中
 func (s *Arena) putVal(v y.ValueStruct) uint32 {
+	l := v.EncodedSize()
+	n := s.n.Add(l)
+	m := n - l
+	v.Encode(s.buf[m:])
 	return 0
 }
 
 func (s *Arena) putKey(key []byte) uint32 {
-	return 0
+	l := uint32(len(key))
+	n := s.n.Add(l)
+	m := n - l
+	copy(s.buf[m:n], key)
+	return m
 }
 
 func (s *Arena) getNode(offset uint32) *node {
