@@ -189,6 +189,9 @@ func TestArena_putKey(t *testing.T) {
 }
 
 func TestArena_putNode(t *testing.T) {
+
+	var value atomic.Uint32
+	value.Store(100) // Initializing the value (optional, default is 0)
 	type fields struct {
 		n   atomic.Uint32
 		buf []byte
@@ -196,13 +199,34 @@ func TestArena_putNode(t *testing.T) {
 	type args struct {
 		height int
 	}
+
 	tests := []struct {
 		name   string
 		fields fields
 		args   args
 		want   uint32
 	}{
-		// TODO: Add test cases.
+		{
+			name: "test",
+			fields: fields{
+				buf: []byte{0, 0, 0},
+			},
+			args: args{
+				height: 1,
+			},
+			want: 0,
+		},
+		{
+			name: "test",
+			fields: fields{
+				n:   value,
+				buf: []byte{0, 0, 0},
+			},
+			args: args{
+				height: 1,
+			},
+			want: 104,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

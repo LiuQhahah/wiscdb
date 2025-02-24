@@ -9,7 +9,8 @@ import (
 
 const (
 	offsetSize = int(unsafe.Sizeof(uint32(0)))
-	nodeAlign  = int(unsafe.Sizeof(uint64(0))) - 1
+	//对齐大小（例如 8 字节对齐）
+	nodeAlign = int(unsafe.Sizeof(uint64(0))) - 1
 )
 
 type SkipList struct {
@@ -50,8 +51,27 @@ func newArena(n int64) *Arena {
 	out.n.Store(1)
 	return out
 }
+
+// 这个函数的主要作用是在一个预分配的内存缓冲区中分配一块内存，并返回该内存块的偏移量
+// 它考虑了内存对齐和未使用的空间，确保分配的内存块是有效的。
+// 如果内存不足，函数会触发 panic。
+// 该函数通常用于实现自定义的内存分配器，特别是在需要高效管理内存的场景中（如数据库、缓存系统等）。
 func (s *Arena) putNode(height int) uint32 {
-	return 0
+	unusedSize := (maxHeight - height) * offsetSize
+	//本次分配的内存块的大小
+	l := uint32(MaxNodeSize - unusedSize + nodeAlign)
+	//当前内存分配器的偏移量（即下一个可用内存的起始位置）
+	n := s.n.Add(l)
+	//计算对齐后的内存偏移量。
+	//它的目的是确保分配的内存块的起始地址是对齐的（通常是按照 nodeAlign 对齐）
+	//n - l：计算出本次分配的内存块的起始位置（未对齐）
+	//n - l + uint32(nodeAlign)：在未对齐的起始位置基础上，加上对齐大小。
+	//这一步是为了确保后续的对齐操作能够正确进行
+	//&^ uint32(nodeAlign)：这是一个按位清除操作（AND NOT），用于将低位的对齐掩码清零，从而得到对齐后的地址
+	m := (n - l + uint32(nodeAlign)) &^ uint32(nodeAlign)
+	//对齐后的内存偏移量
+	//如果 m 为 0，意味着对齐后的内存偏移量是 0，即分配的内存块的起始地址位于 Arena 内存缓冲区的起始位置（s.buf 的开头）
+	return m
 }
 
 // 将v写到v中
