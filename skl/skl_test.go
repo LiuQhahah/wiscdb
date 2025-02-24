@@ -25,9 +25,13 @@ func TestArena_getKey(t *testing.T) {
 		{
 			name: "test",
 			fields: fields{
-				buf: make([]byte, 10),
+				buf: []byte{1, 2, 3, 4},
 			},
-			args: args{},
+			args: args{
+				offset: 1,
+				size:   2,
+			},
+			want: []byte{2, 3},
 		},
 	}
 	for _, tt := range tests {
@@ -116,7 +120,22 @@ func TestArena_getVal(t *testing.T) {
 		args    args
 		wantRet y.ValueStruct
 	}{
-		// TODO: Add test cases.
+		{
+			name: "test",
+			fields: fields{
+				buf: []byte{0, 0, 1, 2, 3, 4, 5},
+			},
+			args: args{
+				offset: 2,
+				size:   4,
+			},
+			wantRet: y.ValueStruct{
+				Meta:      1,
+				UserMeta:  2,
+				ExpiresAt: 3,
+				Value:     []byte{4},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

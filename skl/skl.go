@@ -75,12 +75,16 @@ func (s *Arena) getNode(offset uint32) *node {
 	return &node{}
 }
 
+/*return key */
 func (s *Arena) getKey(offset uint32, size uint16) []byte {
-	return nil
+	return s.buf[offset : offset+uint32(size)]
 }
 
 func (s *Arena) getVal(offset uint32, size uint32) (ret y.ValueStruct) {
-	return y.ValueStruct{}
+	val := s.buf[offset : offset+size]
+	v := y.ValueStruct{}
+	v.Decode(val)
+	return v
 }
 
 func (s *Arena) getNodeOffset(nd *node) uint32 {
