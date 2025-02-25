@@ -645,6 +645,15 @@ func Test_arenaSize(t *testing.T) {
 			args: args{DefaultOptions("../")},
 			want: 64 << 20,
 		},
+		{
+			name: "test2",
+			args: args{opt: Options{
+				MemTableSize:  64 << 20,
+				maxBatchSize:  10,
+				maxBatchCount: 100,
+			}},
+			want: 64<<20 + 10 + 88*100,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
