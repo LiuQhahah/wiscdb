@@ -64,9 +64,9 @@ func DefaultOptions(path string) Options {
 	return Options{
 		Dir:                           path,
 		ValueDir:                      path,
-		MemTableSize:                  64 << 20,
-		BaseTableSize:                 2 << 20,
-		BaseLevelSize:                 10 << 20,
+		MemTableSize:                  64 << 20, //default 64MB
+		BaseTableSize:                 2 << 20,  // default 2 MB
+		BaseLevelSize:                 10 << 20, //default 10MB
 		TableSizeMultiplier:           2,
 		LevelSizeMultiplier:           10,
 		MaxLevels:                     7,
@@ -83,10 +83,10 @@ func DefaultOptions(path string) Options {
 		CompactL0OnClose:              false,
 		VerifyValueChecksum:           false,
 		Compression:                   options.Snappy,
-		BlockCacheSize:                256 << 20,
+		BlockCacheSize:                256 << 20, // default 256MB
 		IndexCacheSize:                0,
 		ZSTDCompressionLevel:          1,
-		ValueLogFileSize:              1<<30 - 1,
+		ValueLogFileSize:              1<<30 - 1, // default 1GB - 1
 		ValueLogMaxEntries:            1000000,
 		VLogPercentile:                0.0,
 		ValueThreshold:                maxValueThreshold,
