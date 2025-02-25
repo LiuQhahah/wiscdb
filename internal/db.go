@@ -3,6 +3,7 @@ package internal
 import (
 	"github.com/dgraph-io/ristretto/v2/z"
 	"sync"
+	"wiscdb/skl"
 )
 
 type DB struct {
@@ -92,4 +93,8 @@ func (db *DB) NewStreamAt(readTs uint64) *Stream {
 	stream := db.newStream()
 	stream.readTs = readTs
 	return stream
+}
+
+func arenaSize(opt Options) int64 {
+	return opt.MemTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
