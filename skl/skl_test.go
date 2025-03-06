@@ -227,6 +227,17 @@ func TestArena_putNode(t *testing.T) {
 			},
 			want: 104,
 		},
+		{
+			name: "test2",
+			fields: fields{
+				n:   value,
+				buf: make([]byte, 2321312),
+			},
+			args: args{
+				maxHeight,
+			},
+			want: 104,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
