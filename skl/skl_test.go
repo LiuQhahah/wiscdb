@@ -192,6 +192,8 @@ func TestArena_putNode(t *testing.T) {
 
 	var value atomic.Uint32
 	value.Store(100) // Initializing the value (optional, default is 0)
+	var value2 atomic.Uint32
+	value2.Store(1000) // Initializing the value (optional, default is 0)
 	type fields struct {
 		n   atomic.Uint32
 		buf []byte
@@ -227,16 +229,17 @@ func TestArena_putNode(t *testing.T) {
 			},
 			want: 104,
 		},
+
 		{
 			name: "test2",
 			fields: fields{
-				n:   value,
-				buf: make([]byte, 2321312),
+				n:   value2,
+				buf: make([]byte, 1000),
 			},
 			args: args{
 				maxHeight,
 			},
-			want: 104,
+			want: 1000,
 		},
 	}
 	for _, tt := range tests {
