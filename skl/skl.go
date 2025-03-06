@@ -27,12 +27,21 @@ const (
 	MaxNodeSize    = int(unsafe.Sizeof(node{}))
 )
 
+// +---------+---------+---------+---------+
+// | value   | keyOffset | keySize | height | tower...
+// +---------+---------+---------+---------+
+// value 占用 8 字节(uint64)
+// keyOffset 占用 4 字节(uint32)
+// keySize 占用 2 字节(uint16)
+// height 占用 2 字节(uint16)
+// tower 占用 72 字节([18]uint32，每个 uint32 占用 4 字节)
+// node一共有88个字节.
 type node struct {
-	value     atomic.Uint64
-	keyOffset uint32
-	keySize   uint16
-	height    uint16
-	tower     [18]atomic.Uint32
+	value     atomic.Uint64     //存储value的地址
+	keyOffset uint32            //存储key的偏移量
+	keySize   uint16            //存储key的大小
+	height    uint16            //存储高度
+	tower     [18]atomic.Uint32 // tower的含义
 }
 
 type Arena struct {
@@ -91,8 +100,20 @@ func (s *Arena) putKey(key []byte) uint32 {
 	return m
 }
 
+// 根据偏移量返回node struct
 func (s *Arena) getNode(offset uint32) *node {
-	return &node{}
+	if offset == 0 {
+		return nil
+	}
+	v := &s.buf[offset]
+	//如果 offset 指向的内存区域与 node 结构体的内存布局一致，
+	//那么 (*node)(unsafe.Pointer(v)) 就可以正确地将这块内存解释为一个 node 结构体
+	// v仅仅是内存位置, 编译器会根据node的结构来访问对应内存大小，然后将这段内存序列化成node struct.
+	//内存的大小是由 目标类型 决定的。当你将 unsafe.Pointer 转换为一个具体的指针类型（例如 *node）时，
+	//Go 编译器会根据目标类型的大小来访问内存
+
+	//node 结构体的大小是由其字段的类型和对齐规则决定的
+	return (*node)(unsafe.Pointer(v))
 }
 
 /*return key */
@@ -146,8 +167,10 @@ func NewSkipList(arenaSize int64) *SkipList {
 func (s *node) setValue(arena *Arena, v y.ValueStruct) {
 
 }
+
+// h指的是链表的高度，
 func (s *node) getNextOffset(h int) uint32 {
-	return 0
+	return s.tower[h].Load()
 }
 
 func (s *node) casNextOffset(h int, old, val uint32) bool {
@@ -158,8 +181,9 @@ func (s *SkipList) randomHeight() int {
 	return 0
 }
 
+// 返回指定层高链表的下一个节点
 func (s *SkipList) getNext(nd *node, height int) *node {
-	return nil
+	return s.arena.getNode(nd.getNextOffset(height))
 }
 
 func (s *SkipList) getHeight() int32 {
@@ -173,8 +197,12 @@ func (s *SkipList) MemSize() int64 {
 	return 0
 }
 
+// 根据key找到这一层插入的位置.
 func (s *SkipList) findSplitForLevel(key []byte, before *node, less int) (*node, *node) {
-	return nil, nil
+	//遍历当前层的链表
+	for {
+		//s.getNext()
+	}
 }
 
 func (s *SkipList) Put(key []byte, v y.ValueStruct) {
@@ -184,7 +212,9 @@ func (s *SkipList) Put(key []byte, v y.ValueStruct) {
 	prev[listHeight] = s.head // 跳表的头为prev指针，设置最高层的node的节点
 	next[listHeight] = nil
 	for i := int(listHeight) - 1; i >= 0; i-- { //遍历当前跳表的高度
+		//第一次传入的参数是跳表的头，返回链表头与下一次节点的值
 		prev[i], next[i] = s.findSplitForLevel(key, prev[i+1], i)
+		//如果存储相等的值，意味着这个key在当前这层的链表中，因此只需要更新value就可以
 		if prev[i] == next[i] {
 			prev[i].setValue(s.arena, v)
 			return

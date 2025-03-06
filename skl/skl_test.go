@@ -52,6 +52,11 @@ func TestArena_getNode(t *testing.T) {
 		n   atomic.Uint32
 		buf []byte
 	}
+	var value1 atomic.Uint32
+	value1.Store(100)
+	var value2 atomic.Uint64
+	value2.Store(2)
+
 	type args struct {
 		offset uint32
 	}
@@ -61,7 +66,19 @@ func TestArena_getNode(t *testing.T) {
 		args   args
 		want   *node
 	}{
-		// TODO: Add test cases.
+		{
+			name: "test",
+			fields: fields{
+				n:   value1,
+				buf: []byte{1, 1, 11, 1, 1, 1, 11, 1},
+			},
+			args: args{
+				offset: 1,
+			},
+			want: &node{
+				value: value2,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
