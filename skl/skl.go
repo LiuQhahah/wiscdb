@@ -29,7 +29,7 @@ const (
 
 type node struct {
 	value     atomic.Uint64
-	ketOffset uint32
+	keyOffset uint32
 	keySize   uint16
 	height    uint16
 	tower     [18]atomic.Uint32
@@ -112,8 +112,16 @@ func (s *Arena) getNodeOffset(nd *node) uint32 {
 }
 
 func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
-	return nil
+	offset := arena.putNode(height)
+	node := arena.getNode(offset)
+	node.keyOffset = arena.putKey(key)
+	node.keySize = uint16(len(key))
+	node.height = uint16(height)
+	node.value.Store(encodeValue(arena.putVal(v), v.EncodedSize()))
+	return node
 }
+
+// save value address
 func encodeValue(valOffset uint32, valSize uint32) uint64 {
 	return 0
 }
@@ -122,7 +130,16 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 	return 0, 0
 }
 
+/*
+*
+arenaSize the size of skip list. default value: 64MB.
+*/
 func NewSkipList(arenaSize int64) *SkipList {
+	arena := newArena(arenaSize)
+	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
+	s := &SkipList{head: head, arena: arena}
+	s.height.Store(1)
+	s.ref.Store(1)
 	return nil
 }
 
@@ -161,7 +178,48 @@ func (s *SkipList) findSplitForLevel(key []byte, before *node, less int) (*node,
 }
 
 func (s *SkipList) Put(key []byte, v y.ValueStruct) {
+	listHeight := s.getHeight() //获取跳表的高度
+	var prev [maxHeight + 1]*node
+	var next [maxHeight + 1]*node
+	prev[listHeight] = s.head // 跳表的头为prev指针，设置最高层的node的节点
+	next[listHeight] = nil
+	for i := int(listHeight) - 1; i >= 0; i-- { //遍历当前跳表的高度
+		prev[i], next[i] = s.findSplitForLevel(key, prev[i+1], i)
+		if prev[i] == next[i] {
+			prev[i].setValue(s.arena, v)
+			return
+		}
+	}
 
+	height := s.randomHeight()
+	x := newNode(s.arena, key, v, height)
+	listHeight = s.getHeight()
+	for height > int(listHeight) {
+		if s.height.CompareAndSwap(listHeight, int32(height)) {
+			break
+		}
+		listHeight = s.getHeight()
+	}
+	for i := 0; i < height; i++ {
+		for {
+			if prev[i] == nil {
+				y.AssertTrue(i > 1)
+				prev[i], next[i] = s.findSplitForLevel(key, s.head, i)
+				y.AssertTrue(prev[i] != next[i])
+			}
+
+			nextOffset := s.arena.getNodeOffset(next[i])
+			x.tower[i].Store(nextOffset)
+			if prev[i].casNextOffset(i, nextOffset, s.arena.getNodeOffset(x)) {
+				break
+			}
+
+			prev[i], next[i] = s.findSplitForLevel(key, prev[i], i)
+			if prev[i] == next[i] {
+				y.AssertTruef(i == 0, "Euality can happend only on base level: %d", i)
+			}
+		}
+	}
 }
 
 func (s *SkipList) Empty() bool {

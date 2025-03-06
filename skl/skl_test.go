@@ -1334,7 +1334,7 @@ func Test_node_casNextOffset(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &node{
 				value:     tt.fields.value,
-				ketOffset: tt.fields.ketOffset,
+				keyOffset: tt.fields.ketOffset,
 				keySize:   tt.fields.keySize,
 				height:    tt.fields.height,
 				tower:     tt.fields.tower,
@@ -1369,7 +1369,7 @@ func Test_node_getNextOffset(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &node{
 				value:     tt.fields.value,
-				ketOffset: tt.fields.ketOffset,
+				keyOffset: tt.fields.ketOffset,
 				keySize:   tt.fields.keySize,
 				height:    tt.fields.height,
 				tower:     tt.fields.tower,
@@ -1404,7 +1404,7 @@ func Test_node_setValue(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &node{
 				value:     tt.fields.value,
-				ketOffset: tt.fields.ketOffset,
+				keyOffset: tt.fields.ketOffset,
 				keySize:   tt.fields.keySize,
 				height:    tt.fields.height,
 				tower:     tt.fields.tower,
