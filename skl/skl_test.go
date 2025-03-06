@@ -1270,12 +1270,23 @@ func Test_newArena(t *testing.T) {
 	type args struct {
 		n int64
 	}
+	nn := atomic.Uint32{}
+	nn.Store(1)
 	tests := []struct {
 		name string
 		args args
 		want *Arena
 	}{
-		// TODO: Add test cases.
+		{
+			name: "Test",
+			args: args{
+				n: 64 << 10,
+			},
+			want: &Arena{
+				n:   nn,
+				buf: make([]byte, 64<<10),
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1363,10 +1374,26 @@ func Test_node_getNextOffset(t *testing.T) {
 		args   args
 		want   uint32
 	}{
-		// TODO: Add test cases.
+		{
+			name: "test",
+			fields: fields{
+				value:     atomic.Uint64{},
+				ketOffset: 0,
+				keySize:   0,
+				height:    0,
+				tower:     [18]atomic.Uint32{},
+			},
+			args: args{
+				h: 10,
+			},
+			want: 100,
+		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tt.fields.value.Store(10)
+			tt.fields.tower[10].Store(100)
 			s := &node{
 				value:     tt.fields.value,
 				keyOffset: tt.fields.ketOffset,
