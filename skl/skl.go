@@ -89,7 +89,8 @@ func (s *Arena) putVal(v y.ValueStruct) uint32 {
 	n := s.n.Add(l)
 	m := n - l
 	v.Encode(s.buf[m:])
-	return 0
+	//返回value的偏移值
+	return m
 }
 
 func (s *Arena) putKey(key []byte) uint32 {
@@ -143,8 +144,9 @@ func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 }
 
 // save value address
+// 使用8个字节存储value的起始位置以及value的尺寸,
 func encodeValue(valOffset uint32, valSize uint32) uint64 {
-	return 0
+	return uint64(valOffset<<32 | valSize)
 }
 
 func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
@@ -164,8 +166,13 @@ func NewSkipList(arenaSize int64) *SkipList {
 	return nil
 }
 
+// set value into node.
+// 先将value存储到内存arena，同时返回当前的游标
 func (s *node) setValue(arena *Arena, v y.ValueStruct) {
-
+	valOffset := arena.putVal(v)
+	//value存储的是当前value的偏移量及其长度，使用8个字节表示，也是一种编码方式
+	value := encodeValue(valOffset, v.EncodedSize())
+	s.value.Store(value)
 }
 
 // h指的是链表的高度，
@@ -205,6 +212,7 @@ func (s *SkipList) findSplitForLevel(key []byte, before *node, less int) (*node,
 	}
 }
 
+// 链表中Put操作
 func (s *SkipList) Put(key []byte, v y.ValueStruct) {
 	listHeight := s.getHeight() //获取跳表的高度
 	var prev [maxHeight + 1]*node
