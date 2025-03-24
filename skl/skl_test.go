@@ -1261,7 +1261,14 @@ func Test_decodeValue(t *testing.T) {
 		wantValOffset uint32
 		wantValSize   uint32
 	}{
-		// TODO: Add test cases.
+		{
+			name: "test",
+			args: args{
+				value: 0x01234567ABCDEFAB,
+			},
+			wantValOffset: 0x01234567,
+			wantValSize:   0xABCDEFAB,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1286,7 +1293,14 @@ func Test_encodeValue(t *testing.T) {
 		args args
 		want uint64
 	}{
-		// TODO: Add test cases.
+		{
+			name: "test",
+			args: args{
+				valOffset: 0x01234567,
+				valSize:   0xABCDEFAB,
+			},
+			want: 0x01234567ABCDEFAB,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

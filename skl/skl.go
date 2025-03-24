@@ -144,13 +144,23 @@ func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 }
 
 // save value address
-// 使用8个字节存储value的起始位置以及value的尺寸,
+// 使用4个字节存储value的起始位置以及value的尺寸,
+// offset: 0x01234567, size:0xABCDEFAB
+// return value: 0x01234567ABCDEFAB
 func encodeValue(valOffset uint32, valSize uint32) uint64 {
 	return uint64(valOffset)<<32 | uint64(valSize)
 }
 
+// 与encodeVale反过来.
+// example:0x01234567ABCDEFAB
+// decode的return值
+// valOffset:0xABCDEFAB
+// valSize: 0x01234567
 func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
-	return 0, 0
+	valSize = uint32(value)
+	valOffset = uint32(value >> 32)
+	return
+
 }
 
 /*
