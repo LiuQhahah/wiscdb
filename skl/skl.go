@@ -146,7 +146,7 @@ func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 // save value address
 // 使用8个字节存储value的起始位置以及value的尺寸,
 func encodeValue(valOffset uint32, valSize uint32) uint64 {
-	return uint64(valOffset<<32 | valSize)
+	return uint64(valOffset)<<32 | uint64(valSize)
 }
 
 func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
