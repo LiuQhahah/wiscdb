@@ -1,7 +1,8 @@
 package y
 
 import (
-	"errors"
+	"fmt"
+	"github.com/pkg/errors"
 	"hash/crc32"
 	"os"
 	"time"
@@ -65,3 +66,16 @@ func SameKey(str, dst []byte) bool {
 func FixedDuration(d time.Duration) string {
 	return ""
 }
+
+// Wrapf is Wrap with extra info.
+func Wrapf(err error, format string, args ...interface{}) error {
+	if !debugMode {
+		if err == nil {
+			return nil
+		}
+		return fmt.Errorf(format+" error: %+v", append(args, err)...)
+	}
+	return errors.Wrapf(err, format, args...)
+}
+
+var debugMode = false

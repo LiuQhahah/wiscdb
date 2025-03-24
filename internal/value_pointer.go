@@ -2,6 +2,10 @@ package internal
 
 import "unsafe"
 
+// 作用
+// 长度指的是entry的key，entry的value，entry的header len以及校验的长度
+// fid指的是当前write ahead log
+// offset指的是io reader的游标位置
 type valuePointer struct {
 	Fid    uint32
 	Len    uint32

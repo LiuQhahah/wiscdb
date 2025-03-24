@@ -47,3 +47,15 @@ func (t *hashReader) ReadByte() (byte, error) {
 func (t *hashReader) Sum32() uint32 {
 	return 0
 }
+
+type safeRead struct {
+	k          []byte
+	v          []byte
+	readOffset uint32
+	lf         *writeAheadLog
+}
+
+// return entry
+func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
+	return &Entry{}, nil
+}
