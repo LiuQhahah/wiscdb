@@ -7,9 +7,11 @@ import (
 	"github.com/dgraph-io/ristretto/v2/z"
 	"hash/crc32"
 	"io"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"wiscdb/pb"
+	"wiscdb/y"
 )
 
 type writeAheadLog struct {
@@ -67,7 +69,7 @@ func (lf *writeAheadLog) open(path string, flags int, fSize int64) error {
 
 var errTruncate = errors.New("Do truncate")
 
-func (lf *writeAheadLog) iterate(readOnly bool, offset uint32, fb logEntry) (uint32, error) {
+func (lf *writeAheadLog) iterate(readOnly bool, offset uint32, fn logEntry) (uint32, error) {
 	if offset == 0 {
 		offset = vlogHeaderSize
 	}
@@ -108,14 +110,51 @@ loop:
 
 		switch {
 		case e.meta&bitTxn > 0:
+			txnTs := y.ParseTs(e.Key)
+			if lastCommit == 0 {
+				lastCommit = txnTs
+			}
+			if lastCommit != txnTs {
+				break loop
+			}
+			entries = append(entries, e)
+			vptrs = append(vptrs, vp)
 
 		case e.meta&bitFinTxn > 0:
+			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
+			if err != nil || lastCommit != txnTs {
+				break loop
+			}
+			lastCommit = 0
+			validEndoffset = read.readOffset
+			for i, e := range entries {
+				vp := vptrs[i]
+				if err := fn(*e, vp); err != nil {
+					if err == errStop {
+						break
+					}
+					return 0, errFile(err, lf.path, "Iteration function")
+				}
+			}
+			entries = entries[:0]
+			vptrs = vptrs[:0]
 		default:
-
+			if lastCommit != 0 {
+				break loop
+			}
+			validEndoffset = read.readOffset
+			if err := fn(*e, vp); err != nil {
+				if err == errStop {
+					break
+				}
+				return 0, errFile(err, lf.path, "Iteration function")
+			}
 		}
 	}
 	return validEndoffset, nil
 }
+
+var errStop = errors.New("Stop iteration")
 
 func (lf *writeAheadLog) bootstrap() error {
 	return nil
