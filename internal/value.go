@@ -29,19 +29,28 @@ type hashReader struct {
 }
 
 func newHashReader(r io.Reader) *hashReader {
-	hash := crc32.New(y.CastTagNoLiCrcTable)
+	hashCrc := crc32.New(y.CastTagNoLiCrcTable)
 	return &hashReader{
 		r: r,
-		h: hash,
+		h: hashCrc,
 	}
 }
 
+// 在将read写到[]byte中还更新已读自己的数量以及hash值
 func (t *hashReader) Read(p []byte) (int, error) {
-	return 0, nil
+	n, err := t.r.Read(p)
+	if err != nil {
+		return n, err
+	}
+	t.bytesRead += n
+	return t.h.Write(p[:n])
 }
 
+// 只读取一个字节大小
 func (t *hashReader) ReadByte() (byte, error) {
-	return 0, nil
+	b := make([]byte, 1)
+	_, err := t.Read(b)
+	return b[0], err
 }
 
 func (t *hashReader) Sum32() uint32 {
@@ -57,5 +66,35 @@ type safeRead struct {
 
 // return entry
 func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
+	hReader := newHashReader(reader)
+	var h header
+	hlen, err := h.DecodeFrom(hReader)
+	if err != nil {
+		return nil, err
+	}
+
+	if h.kLen > uint32(1<<16) {
+		return nil, errTruncate
+	}
+	kl := int(h.kLen)
+	if cap(r.k) < kl {
+		r.k = make([]byte, 2*kl)
+	}
+	vl := int(h.vLen)
+	if cap(r.v) < vl {
+		r.v = make([]byte, 2*vl)
+	}
+	e := &Entry{}
+	e.offset = r.readOffset
+	e.hlen = hlen
+	buf := make([]byte, h.kLen+h.vLen)
+
+	if _, err := io.ReadFull(hReader, buf[:]); err != nil {
+		if err == io.EOF {
+			err = errTruncate
+		}
+		return nil, err
+	}
+
 	return &Entry{}, nil
 }
