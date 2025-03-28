@@ -20,6 +20,10 @@ const (
 // 第一个字节是meta，第二个字节是userMeta，
 // 将kLen和vLen转化成uint64编成可变长度然后写到out中，
 // 实现灵活变化，最后将expiredAt写到out中
+// The encoded header looks like
+// +------+----------+------------+--------------+-----------+
+// | Meta | UserMeta | Key Length | Value Length | ExpiresAt |
+// +------+----------+------------+--------------+-----------+
 func (h header) Encode(out []byte) int {
 	out[0] = h.meta
 	out[1] = h.userMeta
