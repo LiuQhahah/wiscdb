@@ -14,7 +14,7 @@ import (
 	"wiscdb/y"
 )
 
-type writeAheadLog struct {
+type valueLogFile struct {
 	*z.MmapFile
 	path     string
 	lock     sync.RWMutex
@@ -27,49 +27,50 @@ type writeAheadLog struct {
 	opt      Options
 }
 
-func (lf *writeAheadLog) Truncate(end int64) error {
+func (lf *valueLogFile) Truncate(end int64) error {
 	return nil
 }
 
-func (lf *writeAheadLog) encodeEntry(buf *bytes.Buffer, e *Entry, offset uint32) (int, error) {
+func (lf *valueLogFile) encodeEntry(buf *bytes.Buffer, e *Entry, offset uint32) (int, error) {
 	return 0, nil
 }
 
-func (lf *writeAheadLog) writeEntry(buf *bytes.Buffer, e *Entry, opt Options) error {
+func (lf *valueLogFile) writeEntry(buf *bytes.Buffer, e *Entry, opt Options) error {
 	return nil
 }
 
-func (lf *writeAheadLog) encryptionEnabled() bool {
+func (lf *valueLogFile) encryptionEnabled() bool {
 	return false
 }
 
-func (lf *writeAheadLog) zeroNextEntry() {
+func (lf *valueLogFile) zeroNextEntry() {
 
 }
 
-func (lf *writeAheadLog) generateIV(offset uint32) []byte {
+func (lf *valueLogFile) generateIV(offset uint32) []byte {
 	return nil
 }
 
-func (lf *writeAheadLog) decryptKV(buf []byte, offset uint32) ([]byte, error) {
+func (lf *valueLogFile) decryptKV(buf []byte, offset uint32) ([]byte, error) {
 	return nil, nil
 }
 
-func (lf *writeAheadLog) keyID() uint64 {
+func (lf *valueLogFile) keyID() uint64 {
 	return 0
 }
 
-func (lf *writeAheadLog) doneWriting(offset uint32) error {
+func (lf *valueLogFile) doneWriting(offset uint32) error {
 	return nil
 }
 
-func (lf *writeAheadLog) open(path string, flags int, fSize int64) error {
+func (lf *valueLogFile) open(path string, flags int, fSize int64) error {
 	return nil
 }
 
 var errTruncate = errors.New("Do truncate")
 
-func (lf *writeAheadLog) iterate(readOnly bool, offset uint32, fn logEntry) (uint32, error) {
+// 指的是vlog file存储的是value中的实际内容
+func (lf *valueLogFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint32, error) {
 	if offset == 0 {
 		offset = vlogHeaderSize
 	}
@@ -156,10 +157,10 @@ loop:
 
 var errStop = errors.New("Stop iteration")
 
-func (lf *writeAheadLog) bootstrap() error {
+func (lf *valueLogFile) bootstrap() error {
 	return nil
 }
 
-func (lf *writeAheadLog) read(p valuePointer) (buf []byte, err error) {
+func (lf *valueLogFile) read(p valuePointer) (buf []byte, err error) {
 	return nil, nil
 }

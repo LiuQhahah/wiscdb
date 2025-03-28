@@ -61,7 +61,7 @@ type safeRead struct {
 	k          []byte
 	v          []byte
 	readOffset uint32
-	lf         *writeAheadLog
+	lf         *valueLogFile
 }
 
 // return entry

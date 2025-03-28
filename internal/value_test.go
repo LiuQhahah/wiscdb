@@ -131,7 +131,7 @@ func Test_safeRead_Entry(t *testing.T) {
 		k          []byte
 		v          []byte
 		readOffset uint32
-		lf         *writeAheadLog
+		lf         *valueLogFile
 	}
 	type args struct {
 		reader io.Reader

@@ -10,7 +10,7 @@ import (
 type valueLog struct {
 	dirPath            string
 	filesLock          sync.RWMutex
-	filesMap           map[uint32]*writeAheadLog
+	filesMap           map[uint32]*valueLogFile
 	maxFid             uint32
 	filesToBeDeleted   []uint32
 	numActiveIterators atomic.Int32
@@ -44,7 +44,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 	return nil
 }
 
-func (vlog *valueLog) createVlogFile() (*writeAheadLog, error) {
+func (vlog *valueLog) createVlogFile() (*valueLogFile, error) {
 	return nil, nil
 }
 
@@ -63,12 +63,12 @@ func errFile(err error, path string, msg string) error {
 	return nil
 }
 
-func (vlog *valueLog) getFileRLocked(vp valuePointer) (*writeAheadLog, error) {
-	return &writeAheadLog{}, nil
+func (vlog *valueLog) getFileRLocked(vp valuePointer) (*valueLogFile, error) {
+	return &valueLogFile{}, nil
 }
 
-func (vlog *valueLog) readValueBytes(vp valuePointer) ([]byte, *writeAheadLog, error) {
-	return nil, &writeAheadLog{}, nil
+func (vlog *valueLog) readValueBytes(vp valuePointer) ([]byte, *valueLogFile, error) {
+	return nil, &valueLogFile{}, nil
 }
 
 func (vlog *valueLog) Read(vp valuePointer, _ *y.Slice) ([]byte, func(), error) {
@@ -80,7 +80,7 @@ func (vlog *valueLog) Read(vp valuePointer, _ *y.Slice) ([]byte, func(), error) 
 func runCallback(cb func()) {
 
 }
-func (vlog *valueLog) getUnlockCallback(lf *writeAheadLog) func() {
+func (vlog *valueLog) getUnlockCallback(lf *valueLogFile) func() {
 	return func() {
 
 	}
@@ -90,7 +90,7 @@ func (vlog *valueLog) decrIteratorCount() error {
 	return nil
 }
 
-func (vlog *valueLog) deleteLogFile(lf *writeAheadLog) error {
+func (vlog *valueLog) deleteLogFile(lf *valueLogFile) error {
 	return nil
 }
 
@@ -126,11 +126,11 @@ func (vlog *valueLog) runGC(discardRatio float64) error {
 	return nil
 }
 
-func (vlog *valueLog) doRunGC(lf *writeAheadLog) error {
+func (vlog *valueLog) doRunGC(lf *valueLogFile) error {
 	return nil
 }
 
-func (vlog *valueLog) rewrite(f *writeAheadLog) error {
+func (vlog *valueLog) rewrite(f *valueLogFile) error {
 	return nil
 }
 
@@ -142,6 +142,6 @@ func discardEntry(e Entry, vs y.ValueStruct, db *DB) bool {
 	return false
 }
 
-func (vlog *valueLog) pickLog(discardRatio float64) *writeAheadLog {
-	return &writeAheadLog{}
+func (vlog *valueLog) pickLog(discardRatio float64) *valueLogFile {
+	return &valueLogFile{}
 }
