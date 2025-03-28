@@ -148,10 +148,10 @@ func Test_safeRead_Entry(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &safeRead{
-				k:          tt.fields.k,
-				v:          tt.fields.v,
-				readOffset: tt.fields.readOffset,
-				lf:         tt.fields.lf,
+				k:            tt.fields.k,
+				v:            tt.fields.v,
+				recordOffset: tt.fields.readOffset,
+				lf:           tt.fields.lf,
 			}
 			got, err := r.Entry(tt.args.reader)
 			if (err != nil) != tt.wantErr {

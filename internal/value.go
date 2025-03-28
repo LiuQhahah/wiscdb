@@ -11,14 +11,12 @@ import (
 var maxVlogFileSize uint32 = math.MaxUint32
 
 const (
-	bitDelete                byte  = 1 << 0
-	bitValuePointer          byte  = 1 << 1
-	bitDiscardEarlierVersion byte  = 1 << 2
-	bitMergeEntry            byte  = 1 << 3
-	bitTxn                   byte  = 1 << 6
-	bitFinTxn                byte  = 1 << 7
-	mi                       int64 = 1 << 20
-	vlogHeaderSize                 = 20
+	bitDelete       byte  = 1 << 0
+	bitValuePointer byte  = 1 << 1
+	bitTxn          byte  = 1 << 6
+	bitFinTxn       byte  = 1 << 7
+	mi              int64 = 1 << 20
+	vlogHeaderSize        = 20
 )
 
 type logEntry func(e Entry, vp valuePointer) error
@@ -28,6 +26,7 @@ type hashReader struct {
 	bytesRead int
 }
 
+// new hash reader除了使用buffer io reader之外，还是使用了校验和
 func newHashReader(r io.Reader) *hashReader {
 	hashCrc := crc32.New(y.CastTagNoLiCrcTable)
 	return &hashReader{
@@ -37,12 +36,14 @@ func newHashReader(r io.Reader) *hashReader {
 }
 
 // 在将read写到[]byte中还更新已读自己的数量以及hash值
+// Read调用的是bufio将数据读取到p中
 func (t *hashReader) Read(p []byte) (int, error) {
 	n, err := t.r.Read(p)
 	if err != nil {
 		return n, err
 	}
 	t.bytesRead += n
+	//将读取的value进行crc32校验和编码，并将写好的值写到h中.
 	return t.h.Write(p[:n])
 }
 
@@ -53,39 +54,45 @@ func (t *hashReader) ReadByte() (byte, error) {
 	return b[0], err
 }
 
+// 返回sum32的和
 func (t *hashReader) Sum32() uint32 {
-	return 0
+	return t.h.Sum32()
 }
 
 type safeRead struct {
-	k          []byte
-	v          []byte
-	readOffset uint32
-	lf         *valueLogFile
+	k            []byte
+	v            []byte
+	recordOffset uint32
+	lf           *valueLogFile
 }
 
 // return entry
 func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
+	//利用buffer io的reader struct来创建hashReader
 	hReader := newHashReader(reader)
 	var h header
+	//获取到header的长度，包含meta，usermeta,key的长度，value的长度，expiredAt的长度
 	hlen, err := h.DecodeFrom(hReader)
 	if err != nil {
 		return nil, err
 	}
 
+	//1<<16,1<<6等于64KB,如果k的长度大于了64KB就报error
 	if h.kLen > uint32(1<<16) {
 		return nil, errTruncate
 	}
 	kl := int(h.kLen)
+	//这里面使用的数据，一开始10个字节，如果没有key的长度长，则进行扩容
 	if cap(r.k) < kl {
 		r.k = make([]byte, 2*kl)
 	}
 	vl := int(h.vLen)
+	//这里面使用的数据，一开始10个字节，如果没有key的长度长，则进行扩容
 	if cap(r.v) < vl {
 		r.v = make([]byte, 2*vl)
 	}
 	e := &Entry{}
-	e.offset = r.readOffset
+	e.offset = r.recordOffset
 	e.hlen = hlen
 	buf := make([]byte, h.kLen+h.vLen)
 
@@ -95,6 +102,28 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 		}
 		return nil, err
 	}
+	if r.lf.encryptionEnabled() {
+		if buf, err = r.lf.decryptKV(buf[:], r.recordOffset); err != nil {
+			return nil, err
+		}
+	}
 
-	return &Entry{}, nil
+	e.Key = buf[:h.kLen]
+	e.Value = buf[h.kLen:]
+	var crcBuf [crc32.Size]byte
+	if _, err := io.ReadFull(reader, crcBuf[:]); err != nil {
+		if err == io.EOF {
+			err = errTruncate
+		}
+		return nil, err
+	}
+
+	crc := y.BytesToU32(crcBuf[:])
+	if crc != hReader.Sum32() {
+		return nil, errTruncate
+	}
+	e.meta = h.meta
+	e.UserMeta = h.userMeta
+	e.ExpiresAt = h.expiresAt
+	return e, nil
 }
