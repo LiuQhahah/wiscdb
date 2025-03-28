@@ -74,12 +74,14 @@ func (lf *valueLogFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint
 	if offset == 0 {
 		offset = vlogHeaderSize
 	}
+	//返回reader Struct
+	//	调用bufio package返回buffer io的reader
 	reader := bufio.NewReader(lf.NewReader(int(offset)))
 	read := &safeRead{
-		k:          make([]byte, 10),
-		v:          make([]byte, 10),
-		readOffset: offset,
-		lf:         lf,
+		k:            make([]byte, 10),
+		v:            make([]byte, 10),
+		recordOffset: offset,
+		lf:           lf,
 	}
 
 	var lastCommit uint64
@@ -89,6 +91,7 @@ func (lf *valueLogFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint
 
 loop:
 	for {
+		//读取value log中的Entry
 		e, err := read.Entry(reader)
 		switch {
 		case err == io.EOF:
@@ -99,13 +102,13 @@ loop:
 			return 0, err
 		case e == nil:
 			continue
-		case e.isZero():
+		case e.isEmpty():
 			break loop
 		}
 
 		var vp valuePointer
 		vp.Len = uint32(len(e.Key) + len(e.Value) + crc32.Size + e.hlen)
-		read.readOffset += vp.Len
+		read.recordOffset += vp.Len
 		vp.Offset = e.offset
 		vp.Fid = lf.fid
 
@@ -127,7 +130,7 @@ loop:
 				break loop
 			}
 			lastCommit = 0
-			validEndoffset = read.readOffset
+			validEndoffset = read.recordOffset
 			for i, e := range entries {
 				vp := vptrs[i]
 				if err := fn(*e, vp); err != nil {
@@ -143,7 +146,7 @@ loop:
 			if lastCommit != 0 {
 				break loop
 			}
-			validEndoffset = read.readOffset
+			validEndoffset = read.recordOffset
 			if err := fn(*e, vp); err != nil {
 				if err == errStop {
 					break
