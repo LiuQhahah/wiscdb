@@ -126,6 +126,7 @@ loop:
 			vptrs = append(vptrs, vp)
 
 		//如果entry的meta值第7位有值
+		// TODO: 暂时没有找到设置meta的code
 		case e.meta&bitFinTxn > 0:
 			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
 			if err != nil || lastCommit != txnTs {
