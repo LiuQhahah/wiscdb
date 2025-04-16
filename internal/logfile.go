@@ -113,6 +113,7 @@ loop:
 		vp.Fid = lf.fid
 
 		switch {
+		//如果entry的mete值 第6位有值
 		case e.meta&bitTxn > 0:
 			txnTs := y.ParseTs(e.Key)
 			if lastCommit == 0 {
@@ -124,6 +125,7 @@ loop:
 			entries = append(entries, e)
 			vptrs = append(vptrs, vp)
 
+		//如果entry的meta值第7位有值
 		case e.meta&bitFinTxn > 0:
 			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
 			if err != nil || lastCommit != txnTs {

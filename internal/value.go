@@ -13,8 +13,8 @@ var maxVlogFileSize uint32 = math.MaxUint32
 const (
 	bitDelete       byte  = 1 << 0
 	bitValuePointer byte  = 1 << 1
-	bitTxn          byte  = 1 << 6
-	bitFinTxn       byte  = 1 << 7
+	bitTxn          byte  = 1 << 6 //如果条目是txn的一部分，则设置。
+	bitFinTxn       byte  = 1 << 7 //设置该条目是否在值日志中指示txn的结束。
 	mi              int64 = 1 << 20
 	vlogHeaderSize        = 20
 )
