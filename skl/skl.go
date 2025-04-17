@@ -303,6 +303,7 @@ func (s *SkipList) Put(key []byte, value y.ValueStruct) {
 				y.AssertTrue(prev[i] != next[i])
 			}
 
+			//传入node来得到node在分配区arena的偏移量
 			nextOffset := s.arena.getNodeOffset(next[i])
 			//将偏移量存储在tower中
 			node1.tower[i].Store(nextOffset)
@@ -311,7 +312,9 @@ func (s *SkipList) Put(key []byte, value y.ValueStruct) {
 			}
 
 			prev[i], next[i] = s.findSpliceForLevel(key, prev[i], i)
+			// TODO:  这块逻辑没有懂,疑惑：对于没有的key怎么会出现prev[i]与next[i] 相等呢
 			if prev[i] == next[i] {
+				//只能发生在第0层
 				y.AssertTruef(i == 0, "Euality can happend only on base level: %d", i)
 				prev[i].setValue(s.arena, value)
 				return
