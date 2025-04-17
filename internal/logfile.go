@@ -34,58 +34,58 @@ type valueLogFile struct {
 *
 传入
 */
-func (lf *valueLogFile) Truncate(end int64) error {
-	if fi, err := lf.Fd.Stat(); err != nil {
-		return fmt.Errorf("while file.stat on file: %s,error: %v\n", lf.Fd.Name(), err)
+func (vLogFile *valueLogFile) Truncate(end int64) error {
+	if fi, err := vLogFile.Fd.Stat(); err != nil {
+		return fmt.Errorf("while file.stat on file: %s,error: %v\n", vLogFile.Fd.Name(), err)
 	} else if fi.Size() == end {
 		return nil
 	}
-	y.AssertTrue(!lf.opt.ReadOnly)
-	lf.size.Store(uint32(end))
-	return lf.MmapFile.Truncate(end)
+	y.AssertTrue(!vLogFile.opt.ReadOnly)
+	vLogFile.size.Store(uint32(end))
+	return vLogFile.MmapFile.Truncate(end)
 }
 
-func (lf *valueLogFile) encodeEntry(buf *bytes.Buffer, e *Entry, offset uint32) (int, error) {
+func (vLogFile *valueLogFile) encodeEntry(buf *bytes.Buffer, e *Entry, offset uint32) (int, error) {
 	return 0, nil
 }
 
-func (lf *valueLogFile) writeEntry(buf *bytes.Buffer, e *Entry, opt Options) error {
+func (vLogFile *valueLogFile) writeEntry(buf *bytes.Buffer, e *Entry, opt Options) error {
 	return nil
 }
 
-func (lf *valueLogFile) encryptionEnabled() bool {
-	return lf.dataKey != nil
+func (vLogFile *valueLogFile) encryptionEnabled() bool {
+	return vLogFile.dataKey != nil
 }
 
-func (lf *valueLogFile) zeroNextEntry() {
+func (vLogFile *valueLogFile) zeroNextEntry() {
 
 }
 
 // IV指的是 Initialization vector
 // 16个字节数组中存储内容是，前12个字节存储的baseIV的值，后四个字节存储的偏移量
-func (lf *valueLogFile) generateIV(offset uint32) []byte {
+func (vLogFile *valueLogFile) generateIV(offset uint32) []byte {
 	iv := make([]byte, aes.BlockSize)
 	//前12个字节用来存储baseIV
-	y.AssertTrue(12 == copy(iv[:12], lf.baseIV))
+	y.AssertTrue(12 == copy(iv[:12], vLogFile.baseIV))
 	//后四个字节存储偏移量
 	binary.BigEndian.PutUint32(iv[12:], offset)
 	return iv
 }
 
 // 对KV进行解密
-func (lf *valueLogFile) decryptKV(buf []byte, offset uint32) ([]byte, error) {
-	return y.XORBlockAllocate(buf, lf.dataKey.Data, lf.generateIV(offset))
+func (vLogFile *valueLogFile) decryptKV(buf []byte, offset uint32) ([]byte, error) {
+	return y.XORBlockAllocate(buf, vLogFile.dataKey.Data, vLogFile.generateIV(offset))
 }
 
-func (lf *valueLogFile) keyID() uint64 {
+func (vLogFile *valueLogFile) keyID() uint64 {
 	return 0
 }
 
-func (lf *valueLogFile) doneWriting(offset uint32) error {
+func (vLogFile *valueLogFile) doneWriting(offset uint32) error {
 	return nil
 }
 
-func (lf *valueLogFile) open(path string, flags int, fSize int64) error {
+func (vLogFile *valueLogFile) open(path string, flags int, fSize int64) error {
 	return nil
 }
 
@@ -94,7 +94,7 @@ var errTruncate = errors.New("Do truncate")
 // 指的是vlog file存储的是value中的实际内容
 // 输入 offset指的是从哪个位置开始迭代、可以从头开始迭代，logEntry是个函数用于执行具体迭代工作
 // 输出
-func (lf *valueLogFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint32, error) {
+func (vLogFile *valueLogFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint32, error) {
 	//如果偏移量为0 表明从头开始迭代，但是在valuelog中头并不是0，而是从文件headersize开始后读取，
 	//用20个字节来描述文件头，包含魔数等信息
 	if offset == 0 {
@@ -102,12 +102,12 @@ func (lf *valueLogFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint
 	}
 	//返回reader Struct
 	//	调用bufio package返回buffer io的reader
-	reader := bufio.NewReader(lf.NewReader(int(offset)))
+	reader := bufio.NewReader(vLogFile.NewReader(int(offset)))
 	read := &safeRead{
 		k:            make([]byte, 10),
 		v:            make([]byte, 10),
 		recordOffset: offset,
-		lf:           lf,
+		lf:           vLogFile,
 	}
 
 	var lastCommit uint64
@@ -138,7 +138,7 @@ loop:
 		vp.Len = uint32(len(entryResult.Key) + len(entryResult.Value) + crc32.Size + entryResult.hlen)
 		read.recordOffset += vp.Len
 		vp.Offset = entryResult.offset
-		vp.Fid = lf.fid
+		vp.Fid = vLogFile.fid
 
 		switch {
 		//如果entry的mete值 第6位有值
@@ -168,7 +168,7 @@ loop:
 					if err == errStop {
 						break
 					}
-					return 0, errFile(err, lf.path, "Iteration function")
+					return 0, errFile(err, vLogFile.path, "Iteration function")
 				}
 			}
 			entries = entries[:0]
@@ -182,7 +182,7 @@ loop:
 				if err == errStop {
 					break
 				}
-				return 0, errFile(err, lf.path, "Iteration function")
+				return 0, errFile(err, vLogFile.path, "Iteration function")
 			}
 		}
 	}
@@ -191,10 +191,10 @@ loop:
 
 var errStop = errors.New("Stop iteration")
 
-func (lf *valueLogFile) bootstrap() error {
+func (vLogFile *valueLogFile) bootstrap() error {
 	return nil
 }
 
-func (lf *valueLogFile) read(p valuePointer) (buf []byte, err error) {
+func (vLogFile *valueLogFile) read(p valuePointer) (buf []byte, err error) {
 	return nil, nil
 }
