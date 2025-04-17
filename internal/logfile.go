@@ -119,6 +119,7 @@ func (lf *valueLogFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint
 loop:
 	for {
 		//读取value log中的Entry
+		// 解析Entry
 		entryResult, err := read.Entry(reader)
 		switch {
 		case err == io.EOF:
