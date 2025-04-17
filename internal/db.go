@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/dgraph-io/ristretto/v2/z"
+	"math"
 	"path/filepath"
 	"sync"
 	"wiscdb/skl"
@@ -77,10 +78,29 @@ func (db *DB) getFilePathWithFid(fid int) string {
 	return filepath.Join(db.opt.Dir, fmt.Sprintf("%05d%s", fid, memFileExt))
 }
 
+// DB的view函数用于查看DB中的值
 func (db *DB) View(fb func(txn *Txn) error) error {
-	return nil
+	if db.IsClosed() {
+		return ErrDBClosed
+	}
+	var txn *Txn
+	if db.opt.managedTxns {
+		txn = db.NewTransactionAt(math.MaxUint64, false)
+	} else {
+		txn = db.NewTransaction(false)
+	}
+	defer txn.Discard()
+	return fb(txn)
 }
 
+func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
+	if !db.opt.managedTxns {
+		panic("Cannot use NewTransactionAt with managedDB=false, use NewTransaction instead")
+	}
+	txn := db.newTransaction(update, true)
+	txn.readTs = readTs
+	return txn
+}
 func (db *DB) NewTransaction(update bool) *Txn {
 	return &Txn{}
 }
