@@ -63,16 +63,18 @@ type safeRead struct {
 	k            []byte
 	v            []byte
 	recordOffset uint32
-	lf           *valueLogFile
+	lf           *valueLogFile // safeRead包含value log的file，是真正意义上的存储数据的地方
 }
 
 // return entry
+// 输入 传入读取的reader对象
+// 输出 返回entry，按照Entry的结构题来读取数据，验证头、长度等信息， 只返回一个entry的值
 func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 	//利用buffer io的reader struct来创建hashReader
-	hReader := newHashReader(reader)
+	hashReader1 := newHashReader(reader)
 	var h header
 	//获取到header的长度，包含meta，usermeta,key的长度，value的长度，expiredAt的长度
-	hlen, err := h.DecodeFrom(hReader)
+	hlen, err := h.DecodeFrom(hashReader1)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +98,7 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 	e.hlen = hlen
 	buf := make([]byte, h.kLen+h.vLen)
 
-	if _, err := io.ReadFull(hReader, buf[:]); err != nil {
+	if _, err := io.ReadFull(hashReader1, buf[:]); err != nil {
 		if err == io.EOF {
 			err = errTruncate
 		}
@@ -119,7 +121,7 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 	}
 
 	crc := y.BytesToU32(crcBuf[:])
-	if crc != hReader.Sum32() {
+	if crc != hashReader1.Sum32() {
 		return nil, errTruncate
 	}
 	e.meta = h.meta

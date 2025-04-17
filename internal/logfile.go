@@ -3,7 +3,10 @@ package internal
 import (
 	"bufio"
 	"bytes"
+	"crypto/aes"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"github.com/dgraph-io/ristretto/v2/z"
 	"hash/crc32"
 	"io"
@@ -21,14 +24,25 @@ type valueLogFile struct {
 	fid      uint32
 	size     atomic.Uint32
 	dataKey  *pb.DataKey
-	baseIV   []byte
+	baseIV   []byte // TODO: 存储的是什么
 	registry *KeyRegistry
 	writeAt  uint32
 	opt      Options
 }
 
+/*
+*
+传入
+*/
 func (lf *valueLogFile) Truncate(end int64) error {
-	return nil
+	if fi, err := lf.Fd.Stat(); err != nil {
+		return fmt.Errorf("while file.stat on file: %s,error: %v\n", lf.Fd.Name(), err)
+	} else if fi.Size() == end {
+		return nil
+	}
+	y.AssertTrue(!lf.opt.ReadOnly)
+	lf.size.Store(uint32(end))
+	return lf.MmapFile.Truncate(end)
 }
 
 func (lf *valueLogFile) encodeEntry(buf *bytes.Buffer, e *Entry, offset uint32) (int, error) {
@@ -40,19 +54,27 @@ func (lf *valueLogFile) writeEntry(buf *bytes.Buffer, e *Entry, opt Options) err
 }
 
 func (lf *valueLogFile) encryptionEnabled() bool {
-	return false
+	return lf.dataKey != nil
 }
 
 func (lf *valueLogFile) zeroNextEntry() {
 
 }
 
+// IV指的是 Initialization vector
+// 16个字节数组中存储内容是，前12个字节存储的baseIV的值，后四个字节存储的偏移量
 func (lf *valueLogFile) generateIV(offset uint32) []byte {
-	return nil
+	iv := make([]byte, aes.BlockSize)
+	//前12个字节用来存储baseIV
+	y.AssertTrue(12 == copy(iv[:12], lf.baseIV))
+	//后四个字节存储偏移量
+	binary.BigEndian.PutUint32(iv[12:], offset)
+	return iv
 }
 
+// 对KV进行解密
 func (lf *valueLogFile) decryptKV(buf []byte, offset uint32) ([]byte, error) {
-	return nil, nil
+	return y.XORBlockAllocate(buf, lf.dataKey.Data, lf.generateIV(offset))
 }
 
 func (lf *valueLogFile) keyID() uint64 {
@@ -70,7 +92,11 @@ func (lf *valueLogFile) open(path string, flags int, fSize int64) error {
 var errTruncate = errors.New("Do truncate")
 
 // 指的是vlog file存储的是value中的实际内容
+// 输入 offset指的是从哪个位置开始迭代、可以从头开始迭代，logEntry是个函数用于执行具体迭代工作
+// 输出
 func (lf *valueLogFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint32, error) {
+	//如果偏移量为0 表明从头开始迭代，但是在valuelog中头并不是0，而是从文件headersize开始后读取，
+	//用20个字节来描述文件头，包含魔数等信息
 	if offset == 0 {
 		offset = vlogHeaderSize
 	}
@@ -89,10 +115,11 @@ func (lf *valueLogFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint
 	var entries []*Entry
 	var vptrs []valuePointer
 
+	//	直到读到文件截止符才终止循环，或者读到entry的值为null
 loop:
 	for {
 		//读取value log中的Entry
-		e, err := read.Entry(reader)
+		entryResult, err := read.Entry(reader)
 		switch {
 		case err == io.EOF:
 			break loop
@@ -100,35 +127,35 @@ loop:
 			break loop
 		case err != nil:
 			return 0, err
-		case e == nil:
+		case entryResult == nil:
 			continue
-		case e.isEmpty():
+		case entryResult.isEmpty():
 			break loop
 		}
 
 		var vp valuePointer
-		vp.Len = uint32(len(e.Key) + len(e.Value) + crc32.Size + e.hlen)
+		vp.Len = uint32(len(entryResult.Key) + len(entryResult.Value) + crc32.Size + entryResult.hlen)
 		read.recordOffset += vp.Len
-		vp.Offset = e.offset
+		vp.Offset = entryResult.offset
 		vp.Fid = lf.fid
 
 		switch {
 		//如果entry的mete值 第6位有值
-		case e.meta&bitTxn > 0:
-			txnTs := y.ParseTs(e.Key)
+		case entryResult.meta&bitTxn > 0:
+			txnTs := y.ParseTs(entryResult.Key)
 			if lastCommit == 0 {
 				lastCommit = txnTs
 			}
 			if lastCommit != txnTs {
 				break loop
 			}
-			entries = append(entries, e)
+			entries = append(entries, entryResult)
 			vptrs = append(vptrs, vp)
 
 		//如果entry的meta值第7位有值
 		// TODO: 暂时没有找到设置meta的code
-		case e.meta&bitFinTxn > 0:
-			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
+		case entryResult.meta&bitFinTxn > 0:
+			txnTs, err := strconv.ParseUint(string(entryResult.Value), 10, 64)
 			if err != nil || lastCommit != txnTs {
 				break loop
 			}
@@ -150,7 +177,7 @@ loop:
 				break loop
 			}
 			validEndoffset = read.recordOffset
-			if err := fn(*e, vp); err != nil {
+			if err := fn(*entryResult, vp); err != nil {
 				if err == errStop {
 					break
 				}

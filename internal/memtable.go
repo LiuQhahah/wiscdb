@@ -50,7 +50,9 @@ func (mt *memTable) replayFunction(opt Options) func(Entry, valuePointer) error 
 var ErrTruncateNeeded = errors.New("Log truncate required to run DB. This might result in data loss")
 
 // 将wal文件中的信息迭代到memtable中.
+// 更新跳表
 func (mt *memTable) UpdateSkipList() error {
+	// 从0开始遍历
 	endOff, err := mt.wal.iterate(true, 0, mt.replayFunction(mt.opt))
 	if err != nil {
 		return y.Wrapf(err, "while iterating wal: %s", mt.wal.Fd.Name())
