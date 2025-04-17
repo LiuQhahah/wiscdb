@@ -111,7 +111,9 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 		}
 	}
 
+	//得到Entry的key,key和value都存储在buf中.
 	e.Key = buf[:h.kLen]
+	//得到Entry的Value
 	e.Value = buf[h.kLen:]
 	var crcBuf [crc32.Size]byte
 	if _, err := io.ReadFull(reader, crcBuf[:]); err != nil {
