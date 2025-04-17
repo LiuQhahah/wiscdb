@@ -32,14 +32,21 @@ func (mt *memTable) DecrRef() {
 }
 
 // 回放函数，返回函数
+// 第一参数是Entry，按照
 func (mt *memTable) replayFunction(opt Options) func(Entry, valuePointer) error {
 	return func(entry Entry, pointer valuePointer) error {
+		opt.Logger.Debugf("First key=%q\n", entry.Key)
+		//不停解析value log file中的key的事务时间戳，同时更新memtable中的最大版本
+		if ts := y.ParseTs(entry.Key); ts > mt.maxVersion {
+			mt.maxVersion = ts
+		}
 		value := y.ValueStruct{
 			Value:    entry.Value,
 			UserMeta: entry.UserMeta,
 			Meta:     entry.meta,
 			Version:  entry.version,
 		}
+		//将解析出来的entry写到跳表中，key为entry的key，value就是valuestruct，包含value以及各种meta信息
 		mt.sl.Put(entry.Key, value)
 		return nil
 	}

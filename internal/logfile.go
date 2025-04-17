@@ -143,18 +143,23 @@ loop:
 		switch {
 		//如果entry的mete值 第6位有值
 		case entryResult.meta&bitTxn > 0:
+			//获取事务提交的时间戳
 			txnTs := y.ParseTs(entryResult.Key)
+
 			if lastCommit == 0 {
 				lastCommit = txnTs
 			}
+			// 如果上次提交的时间戳和读取到的时间戳一致，那么就跳出循环.
 			if lastCommit != txnTs {
 				break loop
 			}
+			//将读取到的entry存储在entries数组中
 			entries = append(entries, entryResult)
 			vptrs = append(vptrs, vp)
 
 		//如果entry的meta值第7位有值
 		// TODO: 暂时没有找到设置meta的code
+		// 会调用传入的函数fn执行
 		case entryResult.meta&bitFinTxn > 0:
 			txnTs, err := strconv.ParseUint(string(entryResult.Value), 10, 64)
 			if err != nil || lastCommit != txnTs {
@@ -162,6 +167,8 @@ loop:
 			}
 			lastCommit = 0
 			validEndoffset = read.recordOffset
+			// 一个entries对应一个valuepointer
+			// 任务是将key写到跳表中
 			for i, e := range entries {
 				vp := vptrs[i]
 				if err := fn(*e, vp); err != nil {
@@ -186,6 +193,7 @@ loop:
 			}
 		}
 	}
+	//最后返回偏移量
 	return validEndoffset, nil
 }
 

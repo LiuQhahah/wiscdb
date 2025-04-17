@@ -972,12 +972,12 @@ func TestSkipList_findSplitForLevel(t *testing.T) {
 				arena:   tt.fields.arena,
 				OnClose: tt.fields.OnClose,
 			}
-			got, got1 := s.findSplitForLevel(tt.args.key, tt.args.before, tt.args.less)
+			got, got1 := s.findSpliceForLevel(tt.args.key, tt.args.before, tt.args.less)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("findSplitForLevel() got = %v, want %v", got, tt.want)
+				t.Errorf("findSpliceForLevel() got = %v, want %v", got, tt.want)
 			}
 			if !reflect.DeepEqual(got1, tt.want1) {
-				t.Errorf("findSplitForLevel() got1 = %v, want %v", got1, tt.want1)
+				t.Errorf("findSpliceForLevel() got1 = %v, want %v", got1, tt.want1)
 			}
 		})
 	}
@@ -1484,4 +1484,24 @@ func Test_node_setValue(t *testing.T) {
 			s.setValue(tt.args.arena, tt.args.v)
 		})
 	}
+}
+
+func Test_height_Swap(t *testing.T) {
+	height := 10
+	listHeight := 8
+	s := SkipList{}
+	s.height.Store(8)
+	for height > listHeight {
+		//更新下当前跳表的属性：高度
+		//如果listHeight不等于s.height就会执行失败，此时就需要调用listHeight = int(s.getHeight()) 刷新一下
+		if s.height.CompareAndSwap(int32(listHeight), int32(height)) {
+			break
+		}
+		//重新获取跳表高度
+		listHeight = int(s.getHeight())
+	}
+	//if height > listHeight {
+	//	s.height.Store(int32(height))
+	//}
+
 }
