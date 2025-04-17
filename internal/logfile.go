@@ -107,7 +107,7 @@ func (vLogFile *valueLogFile) iterate(readOnly bool, offset uint32, fn logEntry)
 		k:            make([]byte, 10),
 		v:            make([]byte, 10),
 		recordOffset: offset,
-		lf:           vLogFile,
+		vLogFile:     vLogFile,
 	}
 
 	var lastCommit uint64

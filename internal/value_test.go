@@ -151,7 +151,7 @@ func Test_safeRead_Entry(t *testing.T) {
 				k:            tt.fields.k,
 				v:            tt.fields.v,
 				recordOffset: tt.fields.readOffset,
-				lf:           tt.fields.lf,
+				vLogFile:     tt.fields.lf,
 			}
 			got, err := r.Entry(tt.args.reader)
 			if (err != nil) != tt.wantErr {

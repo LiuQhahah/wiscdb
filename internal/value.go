@@ -63,7 +63,7 @@ type safeRead struct {
 	k            []byte
 	v            []byte
 	recordOffset uint32
-	lf           *valueLogFile // safeRead包含value log的file，是真正意义上的存储数据的地方
+	vLogFile     *valueLogFile // safeRead包含value log的file，是真正意义上的存储数据的地方
 }
 
 // return entry
@@ -105,8 +105,8 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 		return nil, err
 	}
 	// TODO:  如果没有enable解密，等同于不会解密valuefile中的data
-	if r.lf.encryptionEnabled() {
-		if buf, err = r.lf.decryptKV(buf[:], r.recordOffset); err != nil {
+	if r.vLogFile.encryptionEnabled() {
+		if buf, err = r.vLogFile.decryptKV(buf[:], r.recordOffset); err != nil {
 			return nil, err
 		}
 	}
