@@ -116,6 +116,7 @@ func (s *Arena) getNode(offset uint32) *node {
 	//Go 编译器会根据目标类型的大小来访问内存
 
 	//node 结构体的大小是由其字段的类型和对齐规则决定的
+	//node存储在分配区Arena中，通过unsafe 包进行直接转化
 	return (*node)(unsafe.Pointer(v))
 }
 
