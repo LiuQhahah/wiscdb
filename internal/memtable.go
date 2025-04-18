@@ -28,7 +28,7 @@ func (mt *memTable) IncrRef() {
 }
 
 func (mt *memTable) DecrRef() {
-
+	mt.sl.DecrRef()
 }
 
 // 回放函数，返回函数

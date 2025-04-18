@@ -21,6 +21,8 @@ type DB struct {
 	mt            *memTable
 	opt           Options
 	registry      *KeyRegistry
+	imm           []*memTable
+	vlog          valueLog
 }
 
 type closer struct {
@@ -164,4 +166,28 @@ default size: MemTableSize:64MiB.
 */
 func arenaSize(opt Options) int64 {
 	return opt.MemTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
+}
+
+// 返回DB struct中的memtable
+func (db *DB) getMemTables() ([]*memTable, func()) {
+	db.lock.RLock()
+	defer db.lock.RUnlock()
+
+	var memTables []*memTable
+	if !db.opt.ReadOnly {
+		memTables = append(memTables, db.mt)
+		db.mt.IncrRef()
+	}
+
+	last := len(db.imm) - 1
+
+	for i := range db.imm {
+		memTables = append(memTables, db.imm[last-i])
+		db.imm[last-i].IncrRef()
+	}
+	return memTables, func() {
+		for _, tbl := range memTables {
+			tbl.DecrRef()
+		}
+	}
 }

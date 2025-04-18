@@ -13,6 +13,7 @@ type IteratorOptions struct {
 	SinceTs        uint64
 }
 
+// 设置默认的迭代选项、预捞取value、捞取100个、不反转、不捞取所有版本
 var DefaultIteratorOptions = IteratorOptions{
 	PrefetchValues: true,
 	PrefetchSize:   100,
