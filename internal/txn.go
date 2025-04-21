@@ -93,6 +93,7 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 
 	//创建迭代器时，将事务中迭代器加1
 	txn.numIterators.Add(1)
+	// TODO: If Prefix is set, only pick those memtables which have keys with the prefix.
 	tables, decr := txn.db.getMemTables()
 	//在函数退出时调用.
 	defer decr()
