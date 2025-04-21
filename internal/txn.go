@@ -3,6 +3,7 @@ package internal
 import (
 	"sync"
 	"sync/atomic"
+	"wiscdb/table"
 	"wiscdb/y"
 )
 
@@ -93,6 +94,23 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	//创建迭代器时，将事务中迭代器加1
 	txn.numIterators.Add(1)
 	tables, decr := txn.db.getMemTables()
+	//在函数退出时调用.
 	defer decr()
 	txn.db.vlog.incrIteratorCount()
+	var iters []y.Iterator
+	if itr := txn.newPendingWritesIterator(opt.Reverse); itr != nil {
+		iters = append(iters, itr)
+	}
+	//遍历db中的mem table, 在找到跳表中的迭代器
+	for i := 0; i < len(tables); i++ {
+		iters = append(iters, tables[i].sl.NewUniIterator(opt.Reverse))
+	}
+	iters = txn.db.lc.AppendIterators(iters, &opt)
+	res := &Iterator{
+		txn:    txn,
+		iitr:   table.NewMergeIterator(iters, opt.Reverse),
+		opt:    opt,
+		readTs: txn.readTs,
+	}
+	return res
 }
