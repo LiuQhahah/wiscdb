@@ -8,6 +8,7 @@ import (
 	"math"
 	"path/filepath"
 	"sync"
+	"wiscdb/level"
 	"wiscdb/skl"
 	"wiscdb/y"
 )
@@ -23,6 +24,7 @@ type DB struct {
 	registry      *KeyRegistry
 	imm           []*memTable
 	vlog          valueLog
+	lc            *level.LevelsController
 }
 
 type closer struct {
@@ -185,6 +187,7 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 		memTables = append(memTables, db.imm[last-i])
 		db.imm[last-i].IncrRef()
 	}
+	//后一个参数是一个钩子函数，用来处理完毕后调用的函数.
 	return memTables, func() {
 		for _, tbl := range memTables {
 			tbl.DecrRef()
