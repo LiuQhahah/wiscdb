@@ -3,6 +3,8 @@ package table
 import (
 	"github.com/dgraph-io/ristretto/v2"
 	"github.com/dgraph-io/ristretto/v2/z"
+	"github.com/pkg/errors"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +14,7 @@ import (
 	"wiscdb/fb"
 	"wiscdb/options"
 	"wiscdb/pb"
+	"wiscdb/y"
 )
 
 type Table struct {
@@ -92,12 +95,73 @@ func (b *Block) verifyCheckSum() error {
 	return nil
 }
 
-func CreateTable(fName string, builder *Builder) {
+func CreateTable(fName string, builder *Builder) (*Table, error) {
+	bd := builder.Done()
+	mf, err := z.OpenMmapFile(fName, os.O_CREATE|os.O_RDWR|os.O_EXCL, bd.Size)
+	if err == z.NewFile {
 
+	} else if err != nil {
+		return nil, y.Wrapf(err, "while creating table: %s", fName)
+	} else {
+		return nil, errors.Errorf("file already exists: %s", fName)
+	}
+	written := bd.Copy(mf.Data)
+	y.AssertTrue(written == len(mf.Data))
+	if err := z.Msync(mf.Data); err != nil {
+		return nil, y.Wrapf(err, "while calling msync on %s", fName)
+	}
+	return OpenTable(mf, *builder.opts)
 }
 
 func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
-	return nil, nil
+	if opts.BlockSize == 0 && opts.Compression != options.None {
+		return nil, errors.New("block size cannot be zero")
+	}
+	//return mmapfile file info
+	fileInfo, err := mf.Fd.Stat()
+	if err != nil {
+		mf.Close(-1)
+		return nil, y.Wrap(err, "")
+	}
+	filename := fileInfo.Name()
+	id, ok := ParseFileID(filename)
+	if !ok {
+		mf.Close(-1)
+		return nil, errors.Errorf("invalid filename: %s", filename)
+	}
+	t := &Table{
+		MmapFile:   mf,
+		id:         id,
+		opt:        &opts,
+		IsInMemory: false,
+		tableSize:  int(fileInfo.Size()),
+		CreatedAt:  fileInfo.ModTime(),
+	}
+	t.ref.Store(1)
+
+	if err := t.initBiggestAndSmallest(); err != nil {
+		return nil, y.Wrapf(err, "failed to initialize table")
+	}
+
+	if opts.ChkMode == options.OnTableRead || opts.ChkMode == options.OnTableAndBlockRead {
+		if err := t.VerifyChecksum(); err != nil {
+			mf.Close(-1)
+			return nil, y.Wrapf(err, "failed to verify checksum")
+		}
+	}
+	return t, nil
+}
+
+func (t *Table) initBiggestAndSmallest() error {
+
+	return nil
+}
+
+func (t *Table) VerifyChecksum() error {
+	return nil
+}
+func (t *Table) fetchIndex() *fb.TableIndex {
+	return nil
 }
 
 /*

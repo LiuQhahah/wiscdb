@@ -53,3 +53,11 @@ func (it *Iterator) Valid() bool {
 func (it *Iterator) Next() {
 
 }
+
+func (itr *Iterator) seekToFirst() {
+
+}
+
+func (itr *Iterator) seekToLast() {
+
+}

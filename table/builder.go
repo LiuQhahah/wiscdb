@@ -58,6 +58,12 @@ type buildData struct {
 	alloc     *z.Allocator
 }
 
+func (bd *buildData) Copy(dst []byte) int {
+	var written int
+
+	return written
+}
+
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 
 }
