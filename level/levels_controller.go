@@ -9,7 +9,7 @@ import (
 	"wiscdb/y"
 )
 
-type levelsController struct {
+type LevelsController struct {
 	nextFileID atomic.Uint64
 	l0stallMs  atomic.Int64
 	levels     []*levelHandler
@@ -17,47 +17,47 @@ type levelsController struct {
 	cstatus    compactStatus
 }
 
-func newLevelController(db *internal.DB, mf *internal.Manifest) (*levelsController, error) {
-	return &levelsController{}, nil
+func newLevelController(db *internal.DB, mf *internal.Manifest) (*LevelsController, error) {
+	return &LevelsController{}, nil
 }
 
-func (s *levelsController) close() error {
+func (s *LevelsController) close() error {
 	return nil
 }
 
-func (s *levelsController) cleanupLevels() error {
+func (s *LevelsController) cleanupLevels() error {
 	return nil
 }
 
-func (s *levelsController) addLevel0Table(t *table.Table) {
+func (s *LevelsController) addLevel0Table(t *table.Table) {
 
 }
 
-func (s *levelsController) startCompact(lc *z.Closer) {
+func (s *LevelsController) startCompact(lc *z.Closer) {
 
 }
 
-func (s *levelsController) runCompactor(id int, lc *z.Closer) {
+func (s *LevelsController) runCompactor(id int, lc *z.Closer) {
 
 }
 
-func (s *levelsController) pickCompactLevels(priosBuffer []compactionPriority) (prios []compactionPriority) {
+func (s *LevelsController) pickCompactLevels(priosBuffer []compactionPriority) (prios []compactionPriority) {
 	return nil
 }
 
-func (s *levelsController) levelTargets() targets {
+func (s *LevelsController) levelTargets() targets {
 	return targets{}
 }
 
-func (s *levelsController) lastLevel() *levelHandler {
+func (s *LevelsController) lastLevel() *levelHandler {
 	return nil
 }
 
-func (s *levelsController) doCompact(id int, p compactionPriority) error {
+func (s *LevelsController) doCompact(id int, p compactionPriority) error {
 	return nil
 }
 
-func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
+func (s *LevelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	return nil
 }
 
@@ -69,13 +69,13 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeS
 	return pb.ManifestChangeSet{}
 }
 
-func (s *levelsController) compactBuildTables(lev int, cd compactDef) ([]*table.Table, func() error, error) {
+func (s *LevelsController) compactBuildTables(lev int, cd compactDef) ([]*table.Table, func() error, error) {
 	return nil, func() error {
 		return nil
 	}, nil
 }
 
-func (s *levelsController) subCompact(it y.Iterator, kr keyRange, cd compactDef, inflightBuilders *y.Throttle, res chan<- *table.Table) {
+func (s *LevelsController) subCompact(it y.Iterator, kr keyRange, cd compactDef, inflightBuilders *y.Throttle, res chan<- *table.Table) {
 
 }
 
@@ -83,52 +83,56 @@ func hasAnyPrefixes(s []byte, listOfPrefixes [][]byte) bool {
 	return false
 }
 
-func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
+func (s *LevelsController) checkOverlap(tables []*table.Table, lev int) bool {
 	return false
 }
-func (s *levelsController) addSplits(cd *compactDef) {
+func (s *LevelsController) addSplits(cd *compactDef) {
 
 }
-func (s *levelsController) fillTables(cd *compactDef) bool {
-	return false
-}
-
-func (s *levelsController) sortByHeuristic(tables []*table.Table, cd *compactDef) {
-
-}
-
-func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compactDef) bool {
-
+func (s *LevelsController) fillTables(cd *compactDef) bool {
 	return false
 }
 
-func (s *levelsController) sortByStaleDataSize(tables []*table.Table, cd *compactDef) {
+func (s *LevelsController) sortByHeuristic(tables []*table.Table, cd *compactDef) {
 
 }
 
-func (s *levelsController) fillTablesL0(cd *compactDef) bool {
-	return false
-}
-func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
-	return false
-}
+func (s *LevelsController) fillMaxLevelTables(tables []*table.Table, cd *compactDef) bool {
 
-func (s *levelsController) fillTablesL0ToLBase(cd *compactDef) bool {
 	return false
 }
 
-func (s *levelsController) appendIterator(iters []y.Iterator, opt *internal.IteratorOptions) []y.Iterator {
+func (s *LevelsController) sortByStaleDataSize(tables []*table.Table, cd *compactDef) {
+
+}
+
+func (s *LevelsController) fillTablesL0(cd *compactDef) bool {
+	return false
+}
+func (s *LevelsController) fillTablesL0ToL0(cd *compactDef) bool {
+	return false
+}
+
+func (s *LevelsController) fillTablesL0ToLBase(cd *compactDef) bool {
+	return false
+}
+
+func (s *LevelsController) appendIterator(iters []y.Iterator, opt *internal.IteratorOptions) []y.Iterator {
 	return nil
 }
 
-func (s *levelsController) keySplits(numPerTable int, prefix []byte) []string {
+func (s *LevelsController) keySplits(numPerTable int, prefix []byte) []string {
 	return nil
 }
 
-func (s *levelsController) getLevelInfo() []LevelInfo {
+func (s *LevelsController) getLevelInfo() []LevelInfo {
 	return nil
 }
 
-func (s *levelsController) verifyChecksum() error {
+func (s *LevelsController) verifyChecksum() error {
+	return nil
+}
+
+func (s *LevelsController) AppendIterators(iters []y.Iterator, opt *internal.IteratorOptions) []y.Iterator {
 	return nil
 }
