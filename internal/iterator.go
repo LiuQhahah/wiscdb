@@ -4,7 +4,7 @@ import "wiscdb/y"
 
 type Iterator struct {
 	iitr   y.Iterator
-	tnx    *Txn
+	txn    *Txn
 	readTs uint64
 	opt    IteratorOptions
 	item   *Item
