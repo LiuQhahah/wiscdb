@@ -194,3 +194,7 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 		}
 	}
 }
+
+func (db *DB) StreamDB(outOptions Options) error {
+	return nil
+}
