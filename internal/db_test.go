@@ -357,8 +357,8 @@ func TestDB_mtFilePath(t *testing.T) {
 				closers:            tt.fields.closers,
 				mt:                 tt.fields.mt,
 			}
-			if got := db.mtFilePath(tt.args.fid); got != tt.want {
-				t.Errorf("mtFilePath() = %v, want %v", got, tt.want)
+			if got := db.getFilePathWithFid(tt.args.fid); got != tt.want {
+				t.Errorf("getFilePathWithFid() = %v, want %v", got, tt.want)
 			}
 		})
 	}

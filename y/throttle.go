@@ -10,8 +10,12 @@ type Throttle struct {
 	finishErr error
 }
 
+// 控制channel的大小
 func NewThrottle(max int) *Throttle {
-	return &Throttle{}
+	return &Throttle{
+		ch:    make(chan struct{}, max),
+		errCh: make(chan error, max),
+	}
 }
 
 func (t *Throttle) Do() error {

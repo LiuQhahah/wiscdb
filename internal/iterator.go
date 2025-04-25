@@ -4,7 +4,7 @@ import "wiscdb/y"
 
 type Iterator struct {
 	iitr   y.Iterator
-	tnx    *Txn
+	txn    *Txn
 	readTs uint64
 	opt    IteratorOptions
 	item   *Item
@@ -51,5 +51,13 @@ func (it *Iterator) Valid() bool {
 }
 
 func (it *Iterator) Next() {
+
+}
+
+func (itr *Iterator) seekToFirst() {
+
+}
+
+func (itr *Iterator) seekToLast() {
 
 }

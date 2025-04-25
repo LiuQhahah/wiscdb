@@ -97,3 +97,17 @@ func DefaultOptions(path string) Options {
 		NamespaceOffset:               -1,
 	}
 }
+
+func (opt *Options) Debugf(format string, v ...interface{}) {
+	if opt.Logger == nil {
+		return
+	}
+	opt.Logger.Debugf(format, v...)
+}
+
+func (opt *Options) Infof(format string, v ...interface{}) {
+	if opt.Logger == nil {
+		return
+	}
+	opt.Logger.Infof(format, v...)
+}

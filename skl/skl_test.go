@@ -52,6 +52,11 @@ func TestArena_getNode(t *testing.T) {
 		n   atomic.Uint32
 		buf []byte
 	}
+	var value1 atomic.Uint32
+	value1.Store(100)
+	var value2 atomic.Uint64
+	value2.Store(2)
+
 	type args struct {
 		offset uint32
 	}
@@ -61,7 +66,19 @@ func TestArena_getNode(t *testing.T) {
 		args   args
 		want   *node
 	}{
-		// TODO: Add test cases.
+		{
+			name: "test",
+			fields: fields{
+				n:   value1,
+				buf: []byte{1, 1, 11, 1, 1, 1, 11, 1},
+			},
+			args: args{
+				offset: 1,
+			},
+			want: &node{
+				value: value2,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -192,6 +209,8 @@ func TestArena_putNode(t *testing.T) {
 
 	var value atomic.Uint32
 	value.Store(100) // Initializing the value (optional, default is 0)
+	var value2 atomic.Uint32
+	value2.Store(1000) // Initializing the value (optional, default is 0)
 	type fields struct {
 		n   atomic.Uint32
 		buf []byte
@@ -226,6 +245,18 @@ func TestArena_putNode(t *testing.T) {
 				height: 1,
 			},
 			want: 104,
+		},
+
+		{
+			name: "test2",
+			fields: fields{
+				n:   value2,
+				buf: make([]byte, 1000),
+			},
+			args: args{
+				maxHeight,
+			},
+			want: 1000,
 		},
 	}
 	for _, tt := range tests {
@@ -941,12 +972,12 @@ func TestSkipList_findSplitForLevel(t *testing.T) {
 				arena:   tt.fields.arena,
 				OnClose: tt.fields.OnClose,
 			}
-			got, got1 := s.findSplitForLevel(tt.args.key, tt.args.before, tt.args.less)
+			got, got1 := s.findSpliceForLevel(tt.args.key, tt.args.before, tt.args.less)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("findSplitForLevel() got = %v, want %v", got, tt.want)
+				t.Errorf("findSpliceForLevel() got = %v, want %v", got, tt.want)
 			}
 			if !reflect.DeepEqual(got1, tt.want1) {
-				t.Errorf("findSplitForLevel() got1 = %v, want %v", got1, tt.want1)
+				t.Errorf("findSpliceForLevel() got1 = %v, want %v", got1, tt.want1)
 			}
 		})
 	}
@@ -1230,7 +1261,14 @@ func Test_decodeValue(t *testing.T) {
 		wantValOffset uint32
 		wantValSize   uint32
 	}{
-		// TODO: Add test cases.
+		{
+			name: "test",
+			args: args{
+				value: 0x01234567ABCDEFAB,
+			},
+			wantValOffset: 0x01234567,
+			wantValSize:   0xABCDEFAB,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1255,7 +1293,14 @@ func Test_encodeValue(t *testing.T) {
 		args args
 		want uint64
 	}{
-		// TODO: Add test cases.
+		{
+			name: "test",
+			args: args{
+				valOffset: 0x01234567,
+				valSize:   0xABCDEFAB,
+			},
+			want: 0x01234567ABCDEFAB,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1270,12 +1315,23 @@ func Test_newArena(t *testing.T) {
 	type args struct {
 		n int64
 	}
+	nn := atomic.Uint32{}
+	nn.Store(1)
 	tests := []struct {
 		name string
 		args args
 		want *Arena
 	}{
-		// TODO: Add test cases.
+		{
+			name: "Test",
+			args: args{
+				n: 64 << 10,
+			},
+			want: &Arena{
+				n:   nn,
+				buf: make([]byte, 64<<10),
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1363,10 +1419,26 @@ func Test_node_getNextOffset(t *testing.T) {
 		args   args
 		want   uint32
 	}{
-		// TODO: Add test cases.
+		{
+			name: "test",
+			fields: fields{
+				value:     atomic.Uint64{},
+				ketOffset: 0,
+				keySize:   0,
+				height:    0,
+				tower:     [18]atomic.Uint32{},
+			},
+			args: args{
+				h: 10,
+			},
+			want: 100,
+		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tt.fields.value.Store(10)
+			tt.fields.tower[10].Store(100)
 			s := &node{
 				value:     tt.fields.value,
 				keyOffset: tt.fields.ketOffset,
@@ -1412,4 +1484,24 @@ func Test_node_setValue(t *testing.T) {
 			s.setValue(tt.args.arena, tt.args.v)
 		})
 	}
+}
+
+func Test_height_Swap(t *testing.T) {
+	height := 10
+	listHeight := 8
+	s := SkipList{}
+	s.height.Store(8)
+	for height > listHeight {
+		//更新下当前跳表的属性：高度
+		//如果listHeight不等于s.height就会执行失败，此时就需要调用listHeight = int(s.getHeight()) 刷新一下
+		if s.height.CompareAndSwap(int32(listHeight), int32(height)) {
+			break
+		}
+		//重新获取跳表高度
+		listHeight = int(s.getHeight())
+	}
+	//if height > listHeight {
+	//	s.height.Store(int32(height))
+	//}
+
 }
