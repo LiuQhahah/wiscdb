@@ -56,3 +56,47 @@ func (o *oracle) doneRead(txn *Txn) {
 		o.readMark.Done(txn.readTs)
 	}
 }
+
+func (o *oracle) hasConflict(txn *Txn) bool {
+	if len(txn.reads) == 0 {
+		return false
+	}
+	for _, committedTxn := range o.committedTxns {
+		if committedTxn.ts <= txn.readTs {
+			continue
+		}
+
+		for _, ro := range txn.reads {
+			if _, has := committedTxn.conflictKeys[ro]; has {
+				return true
+			}
+		}
+	}
+	return false
+}
+func (o *oracle) newCommitTs(txn *Txn) (uint64, bool) {
+	o.Lock()
+	defer o.Unlock()
+	if o.hasConflict(txn) {
+		return 0, true
+	}
+	var ts uint64
+
+	if !o.isManaged {
+		o.doneRead(txn)
+		o.cleanupCommittedTransactions()
+		ts = o.nextTxnTs
+		o.nextTxnTs++
+		o.txnMark.Begin(ts)
+	} else {
+		ts = txn.commitTs
+	}
+	y.AssertTrue(ts >= o.lastCleanupTs)
+	if o.deleteConflicts {
+		o.committedTxns = append(o.committedTxns, committedTxn{
+			ts:           ts,
+			conflictKeys: txn.conflictKeys,
+		})
+	}
+	return ts, true
+}
