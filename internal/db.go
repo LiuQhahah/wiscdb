@@ -33,6 +33,7 @@ type DB struct {
 	lc            *level.LevelsController
 
 	threshold *vlogThreshold
+	orc       *oracle
 }
 
 type closer struct {

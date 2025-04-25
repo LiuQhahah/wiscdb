@@ -44,6 +44,16 @@ func (txn *Txn) checkTransactionCountAndSize(e *Entry) error {
 }
 
 func (txn *Txn) Discard() {
+	if txn.discarded {
+		return
+	}
+	if txn.numIterators.Load() > 0 {
+		panic("Unclosed iterator at time of Txn.Discard.")
+	}
+	txn.discarded = true
+	if !txn.db.orc.isManaged {
+		txn.db.orc.doneRead(txn)
+	}
 
 }
 
@@ -105,6 +115,11 @@ func (txn *Txn) commitPreCheck() error {
 }
 
 func (txn *Txn) Commit() error {
+	//1. check pendingWrites
+	if len(txn.pendingWrites) == 0 {
+		txn.Discard()
+		return nil
+	}
 	return nil
 }
 

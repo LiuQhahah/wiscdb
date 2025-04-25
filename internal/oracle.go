@@ -49,3 +49,10 @@ func (o *oracle) cleanupCommittedTransactions() {
 func (o *oracle) doneCommit(cts uint64) {
 
 }
+
+func (o *oracle) doneRead(txn *Txn) {
+	if !txn.doneRead {
+		txn.doneRead = true
+		o.readMark.Done(txn.readTs)
+	}
+}
