@@ -1,6 +1,11 @@
 package internal
 
 import (
+	"bytes"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"github.com/dgraph-io/ristretto/v2/z"
 	"sync"
 	"sync/atomic"
 	"wiscdb/table"
@@ -28,7 +33,13 @@ func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
 	return &pendingWritesIterator{}
 }
 
-func (txn *Txn) checkSize(e *Entry) error {
+func (txn *Txn) checkTransactionCountAndSize(e *Entry) error {
+	count := txn.count + 1
+	size := txn.size + e.estimateSizeAndSetThreshold(txn.db.valueThreshold()) + 10
+	if count >= txn.db.opt.maxBatchCount || size >= txn.db.opt.maxBatchSize {
+		return ErrTxnTooBig
+	}
+	txn.count, txn.size = count, size
 	return nil
 }
 
@@ -37,7 +48,46 @@ func (txn *Txn) Discard() {
 }
 
 func (txn *Txn) modify(e *Entry) error {
+	const maxKeySize = 65000
+	switch {
+	case !txn.update:
+		return ErrReadOnlyTxn
+	case !txn.discarded:
+		return ErrDiscardedTxn
+	case len(e.Key) == 0:
+		return ErrEmptyKey
+	case bytes.HasPrefix(e.Key, wiscPrefix):
+		return ErrInvalidKey
+	case len(e.Key) > maxKeySize:
+		return exceedsSize("Key", maxKeySize, e.Key)
+	case int64(len(e.Value)) > txn.db.opt.ValueLogFileSize:
+		return exceedsSize("Value", txn.db.opt.ValueLogFileSize, e.Key)
+	case txn.db.opt.InMemory && int64(len(e.Value)) > txn.db.valueThreshold():
+		return exceedsSize("Value", txn.db.valueThreshold(), e.Value)
+	}
+
+	if err := txn.db.isBanned(e.Key); err != nil {
+		return err
+	}
+	if err := txn.checkTransactionCountAndSize(e); err != nil {
+		return err
+	}
+
+	if txn.db.opt.DetectConflicts {
+		fp := z.MemHash(e.Key)
+		txn.conflictKeys[fp] = struct{}{}
+	}
+
+	if oldEntry, ok := txn.pendingWrites[string(e.Key)]; ok && oldEntry.version != e.version {
+		txn.duplicateWrites = append(txn.duplicateWrites, oldEntry)
+	}
+	txn.pendingWrites[string(e.Key)] = e
 	return nil
+}
+
+func exceedsSize(prefix string, max int64, key []byte) error {
+	errMessage := fmt.Sprintf("%s with size %d exceeded %d limit. %s:\n%s", prefix, len(key), max, prefix, hex.Dump(key[:1<<10]))
+	return errors.New(errMessage)
 }
 
 func (txn *Txn) addReadKey(key []byte) {
@@ -67,11 +117,11 @@ func (txn *Txn) ReadTs() uint64 {
 }
 
 func (txn *Txn) SetEntry(e *Entry) error {
-	return nil
+	return txn.modify(e)
 }
 
 func (txn *Txn) Set(key, value []byte) error {
-	return nil
+	return txn.SetEntry(NewEntry(key, value))
 }
 
 func (txn *Txn) Get(key []byte) (item *Item, err error) {
@@ -84,7 +134,7 @@ func (txn *Txn) Delete(key []byte) error {
 
 func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	if txn.discarded {
-		panic(ErrDiscardTxn)
+		panic(ErrDiscardedTxn)
 	}
 	if txn.db.IsClosed() {
 		panic(ErrDBClosed)

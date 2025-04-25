@@ -13,6 +13,12 @@ import (
 	"wiscdb/y"
 )
 
+var (
+	wiscPrefix  = []byte("!wisc!")
+	txnKey      = []byte("!wisc!txn")
+	bannedNsKey = []byte("!wisc!banned")
+)
+
 type DB struct {
 	testOnlyExtensions
 	lock          sync.RWMutex
@@ -25,6 +31,8 @@ type DB struct {
 	imm           []*memTable
 	vlog          valueLog
 	lc            *level.LevelsController
+
+	threshold *vlogThreshold
 }
 
 type closer struct {
@@ -138,7 +146,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 }
 
 func (db *DB) valueThreshold() int64 {
-	return 0
+	return db.threshold.valueThreshold.Load()
 }
 
 func (db *DB) newStream() *Stream {
