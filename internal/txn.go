@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/dgraph-io/ristretto/v2/z"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"wiscdb/table"
@@ -44,6 +45,16 @@ func (txn *Txn) checkTransactionCountAndSize(e *Entry) error {
 }
 
 func (txn *Txn) Discard() {
+	if txn.discarded {
+		return
+	}
+	if txn.numIterators.Load() > 0 {
+		panic("Unclosed iterator at time of Txn.Discard.")
+	}
+	txn.discarded = true
+	if !txn.db.orc.isManaged {
+		txn.db.orc.doneRead(txn)
+	}
 
 }
 
@@ -95,17 +106,98 @@ func (txn *Txn) addReadKey(key []byte) {
 }
 
 func (txn *Txn) commitAndSend() (func() error, error) {
-	return func() error {
-		return nil
-	}, nil
+	orc := txn.db.orc
+	orc.writeChLock.Lock()
+	defer orc.writeChLock.Unlock()
+
+	commitTs, conflict := orc.newCommitTs(txn)
+	if conflict {
+		return nil, ErrConflict
+	}
+	keepTogether := true
+	setVersion := func(e *Entry) {
+		if e.version == 0 {
+			e.version = commitTs
+		} else {
+			keepTogether = false
+		}
+	}
+	for _, e := range txn.pendingWrites {
+		setVersion(e)
+	}
+
+	for _, e := range txn.duplicateWrites {
+		setVersion(e)
+	}
+	entries := make([]*Entry, 0, len(txn.pendingWrites)+len(txn.duplicateWrites)+1)
+
+	processEntry := func(e *Entry) {
+		e.Key = y.KeyWithTs(e.Key, e.version)
+		if keepTogether {
+			e.meta |= bitTxn
+		}
+		entries = append(entries, e)
+	}
+	for _, e := range txn.pendingWrites {
+		processEntry(e)
+	}
+	for _, e := range txn.duplicateWrites {
+		processEntry(e)
+	}
+	if keepTogether {
+		y.AssertTrue(commitTs != 0)
+		e := &Entry{
+			Key:   y.KeyWithTs(txnKey, commitTs),
+			Value: []byte(strconv.FormatUint(commitTs, 10)),
+			meta:  bitFinTxn,
+		}
+		entries = append(entries, e)
+	}
+	req, err := txn.db.sendToWriteCh(entries)
+	if err != nil {
+		orc.doneCommit(commitTs)
+		return nil, err
+	}
+	ret := func() error {
+		err := req.Wait()
+		orc.doneCommit(commitTs)
+		return err
+	}
+
+	return ret, nil
 }
 
 func (txn *Txn) commitPreCheck() error {
+	if txn.discarded {
+		return errors.New("the txn has been discarded")
+	}
+	keepTogether := true
+	for _, e := range txn.pendingWrites {
+		if e.version != 0 {
+			keepTogether = false
+		}
+	}
+	if keepTogether && txn.db.opt.managedTxns && txn.commitTs == 0 {
+		return errors.New("CommitTs cannot be zero. Please use commitAt instead")
+	}
 	return nil
 }
 
 func (txn *Txn) Commit() error {
-	return nil
+	//1. check pendingWrites
+	if len(txn.pendingWrites) == 0 {
+		txn.Discard()
+		return nil
+	}
+	if err := txn.commitPreCheck(); err != nil {
+		return err
+	}
+	defer txn.Discard()
+	txnCb, err := txn.commitAndSend()
+	if err != nil {
+		return err
+	}
+	return txnCb()
 }
 
 func (txn *Txn) CommitWith(cb func(err error)) {

@@ -8,6 +8,7 @@ import (
 	"math"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"wiscdb/level"
 	"wiscdb/skl"
 	"wiscdb/y"
@@ -32,7 +33,10 @@ type DB struct {
 	vlog          valueLog
 	lc            *level.LevelsController
 
-	threshold *vlogThreshold
+	threshold   *vlogThreshold
+	orc         *oracle
+	blockWrites atomic.Int32
+	writeCh     chan *request
 }
 
 type closer struct {
@@ -141,8 +145,33 @@ func (db *DB) BanNamespace(ns uint64) error {
 	return nil
 }
 
+var requestPool = sync.Pool{
+	New: func() interface{} {
+		return new(request)
+	},
+}
+
 func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
-	return &request{}, nil
+	if db.blockWrites.Load() == 1 {
+		return nil, ErrBlockedWrites
+	}
+	var count, size int64
+	for _, e := range entries {
+		size += e.estimateSizeAndSetThreshold(db.valueThreshold())
+		count++
+	}
+	y.NumBytesWrittenUserAdd(db.opt.MetricsEnabled, size)
+	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
+		return nil, ErrTxnTooBig
+	}
+	req := requestPool.Get().(*request)
+	req.reset()
+	req.Entries = entries
+	req.Wg.Add(1)
+	req.IncrRef()
+	db.writeCh <- req
+	y.NumPutsAdd(db.opt.MetricsEnabled, int64(len(entries)))
+	return req, nil
 }
 
 func (db *DB) valueThreshold() int64 {
