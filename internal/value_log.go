@@ -103,6 +103,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 	}
 	//将value log写到磁盘中
 	toDisk := func() error {
+		//判断当前value log file的文件偏移量如果超过设置的value log则写道log file中
 		if vlog.wOffset() > uint32(vlog.opt.ValueLogFileSize) || vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
 			if err := curlf.doneWriting(vlog.wOffset()); err != nil {
 				return err
@@ -154,6 +155,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		vlog.numEntriesWritten += uint32(written)
 		vlog.db.threshold.update(valueSizes)
 
+		//将value log写到磁盘中
 		if err := toDisk(); err != nil {
 			return err
 		}

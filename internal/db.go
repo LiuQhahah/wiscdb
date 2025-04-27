@@ -259,6 +259,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 	}
 
 	db.opt.Debugf("writeRequests called. Writing to value log")
+	// TODO: 没有得到是否写到本地文件中
 	err := db.vlog.write(reqs)
 	if err != nil {
 		done(err)

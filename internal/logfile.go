@@ -38,10 +38,13 @@ func (vLogFile *valueLogFile) Truncate(end int64) error {
 	if fi, err := vLogFile.Fd.Stat(); err != nil {
 		return fmt.Errorf("while file.stat on file: %s,error: %v\n", vLogFile.Fd.Name(), err)
 	} else if fi.Size() == end {
+		//无需截断
 		return nil
 	}
 	y.AssertTrue(!vLogFile.opt.ReadOnly)
+	//记录当前文件大小
 	vLogFile.size.Store(uint32(end))
+	//执行文件截断
 	return vLogFile.MmapFile.Truncate(end)
 }
 
