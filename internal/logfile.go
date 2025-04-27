@@ -45,8 +45,46 @@ func (vLogFile *valueLogFile) Truncate(end int64) error {
 	return vLogFile.MmapFile.Truncate(end)
 }
 
+// 对entry进行编码
 func (vLogFile *valueLogFile) encodeEntry(buf *bytes.Buffer, e *Entry, offset uint32) (int, error) {
-	return 0, nil
+	h := header{
+		kLen:      uint32(len(e.Key)),
+		vLen:      uint32(len(e.Value)),
+		expiresAt: e.ExpiresAt,
+		meta:      e.meta,
+		userMeta:  e.UserMeta,
+	}
+	hash := crc32.New(y.CastTagNoLiCrcTable)
+	//使用io的mulit writer可以实现buf和hash串行写到文件中
+	writer := io.MultiWriter(buf, hash)
+
+	var headerEnc [maxHeaderSize]byte
+	//对header进行编码
+	sz := h.Encode(headerEnc[:])
+	//将header写到writer中
+	y.Check2(writer.Write(headerEnc[:sz]))
+	//判断value log是否开启加密的条件是Datakey是否为null，这个条件有点怪异
+	if vLogFile.encryptionEnabled() {
+		eBuf := make([]byte, 0, len(e.Key)+len(e.Value))
+		//将e.Key和e.Value展开并append到eBuf中
+		// 使用 的是go的语法糖
+		eBuf = append(eBuf, e.Key...)
+		eBuf = append(eBuf, e.Value...)
+		//传入参数计算校验合
+		if err := y.XORBlockStream(
+			writer, eBuf, vLogFile.dataKey.Data, vLogFile.generateIV(offset)); err != nil {
+			return 0, y.Wrapf(err, "Error while encoding entry for vlog.")
+		}
+	} else {
+		//不采用校验合的方法就是直接写入key和value
+		y.Check2(writer.Write(e.Key))
+		y.Check2(writer.Write(e.Value))
+	}
+	var crcBuf [crc32.Size]byte
+	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
+	y.Check2(buf.Write(crcBuf[:]))
+
+	return len(headerEnc[:sz]) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
 func (vLogFile *valueLogFile) writeEntry(buf *bytes.Buffer, e *Entry, opt Options) error {

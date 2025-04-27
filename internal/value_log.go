@@ -3,6 +3,8 @@ package internal
 import (
 	"bytes"
 	"github.com/dgraph-io/ristretto/v2/z"
+	"github.com/pkg/errors"
+	"hash/crc32"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -38,7 +40,24 @@ func (vlog *valueLog) wOffset() uint32 {
 	return vlog.writableLogOffset.Load()
 }
 
+// 遍历每一个request中的entryies如果当前value log的偏移量超过了设定的值比如1GB
+// 那么就会重置偏移量
 func (vlog *valueLog) validateWrites(reqs []*request) error {
+	vlogOffset := uint64(vlog.wOffset())
+	for _, req := range reqs {
+		size := estimateRequestSize(req)
+		estimatedVlogOffset := vlogOffset + size
+		//MaxUint32 1<<32 = 4GB-1byte
+		if estimatedVlogOffset > uint64(maxVlogFileSize) {
+			return errors.Errorf("Request size offset %d is bigger than maximum offset %d", estimatedVlogOffset, maxVlogFileSize)
+		}
+		//default size:ValueLogFileSize=1GB
+		if estimatedVlogOffset >= uint64(vlog.opt.ValueLogFileSize) {
+			vlogOffset = 0
+			continue
+		}
+		vlogOffset = estimatedVlogOffset
+	}
 	return nil
 }
 
@@ -168,8 +187,14 @@ func (vlog *valueLog) createVlogFile() (*valueLogFile, error) {
 	return vlogFile, nil
 }
 
+// 一个request中包含多个entry即多个key-value
+// 一个entry的size包含header+key的尺寸、value的尺寸以及校验和的大小
 func estimateRequestSize(req *request) uint64 {
-	return 0
+	size := uint64(0)
+	for _, e := range req.Entries {
+		size += uint64(maxHeaderSize + len(e.Key) + len(e.Value) + crc32.Size)
+	}
+	return size
 }
 func (vlog *valueLog) fPath(fid uint32) string {
 	return ""
