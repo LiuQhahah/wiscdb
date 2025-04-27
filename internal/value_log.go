@@ -2,6 +2,7 @@ package internal
 
 import (
 	"bytes"
+	"fmt"
 	"github.com/dgraph-io/ristretto/v2/z"
 	"github.com/pkg/errors"
 	"hash/crc32"
@@ -110,6 +111,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 				return err
 			}
 			//写完后就会创建新的文件此时文件id会+1
+			//{fid}.vlog
 			newlf, err := vlog.createValuelogFile()
 			if err != nil {
 				return err
@@ -201,11 +203,11 @@ func estimateRequestSize(req *request) uint64 {
 	return size
 }
 func (vlog *valueLog) fPath(fid uint32) string {
-	return ""
+	return vlogFilePath(vlog.dirPath, fid)
 }
 
 func vlogFilePath(dirPath string, fid uint32) string {
-	return ""
+	return fmt.Sprintf("%s%s%06d.vlog", dirPath, string(os.PathSeparator), fid)
 }
 
 func errFile(err error, path string, msg string) error {
