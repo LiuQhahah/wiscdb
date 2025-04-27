@@ -12,7 +12,7 @@ var maxVlogFileSize uint32 = math.MaxUint32
 
 const (
 	bitDelete       byte  = 1 << 0
-	bitValuePointer byte  = 1 << 1
+	bitValuePointer byte  = 1 << 1 //表示该key对应的是真正的value还是value对应的指针
 	bitTxn          byte  = 1 << 6 //如果条目是txn的一部分，则设置。
 	bitFinTxn       byte  = 1 << 7 //设置该条目是否在值日志中指示txn的结束。
 	mi              int64 = 1 << 20

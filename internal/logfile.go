@@ -82,6 +82,16 @@ func (vLogFile *valueLogFile) keyID() uint64 {
 }
 
 func (vLogFile *valueLogFile) doneWriting(offset uint32) error {
+	if vLogFile.opt.SyncWrites {
+		if err := vLogFile.Sync(); err != nil {
+			return y.Wrapf(err, "Unable to sync value log: %q", vLogFile.path)
+		}
+	}
+	vLogFile.lock.Lock()
+	defer vLogFile.lock.Unlock()
+	if err := vLogFile.Truncate(int64(offset)); err != nil {
+		return y.Wrapf(err, "Unable to truncate file: %q", vLogFile.path)
+	}
 	return nil
 }
 

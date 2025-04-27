@@ -7,6 +7,9 @@ var (
 	numBytesWrittenUser *expvar.Int
 	numPuts             *expvar.Int
 	pendingWrites       *expvar.Map
+	numBytesWrittenToL0 *expvar.Int
+	numWritesVlog       *expvar.Int
+	numBytesVlogWritten *expvar.Int
 )
 
 const (
@@ -42,4 +45,16 @@ func storeToMap(enabled bool, metric *expvar.Map, key string, value expvar.Var) 
 		return
 	}
 	metric.Set(key, value)
+}
+
+func NumBytesWrittenToL0Add(enabled bool, val int64) {
+	addInt(enabled, numBytesWrittenToL0, val)
+}
+
+func NumWritesVlogAdd(enabled bool, val int64) {
+	addInt(enabled, numWritesVlog, val)
+}
+
+func NumBytesWrittenVlogAdd(enabled bool, val int64) {
+	addInt(enabled, numBytesVlogWritten, val)
 }

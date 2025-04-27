@@ -37,6 +37,7 @@ type DB struct {
 	imm           []*memTable
 	vlog          valueLog
 	lc            *level.LevelsController
+	flushChan     chan *memTable
 
 	threshold   *vlogThreshold
 	orc         *oracle
@@ -298,13 +299,71 @@ func (db *DB) writeRequests(reqs []*request) error {
 }
 
 func (db *DB) writeToLSM(b *request) error {
+	if !db.opt.InMemory && len(b.Ptrs) != len(b.Entries) {
+		errMessage := fmt.Sprintf("Ptrs and Entries don't match: %+v", b)
+		return errors.New(errMessage)
+	}
+	for i, entry := range b.Entries {
+		var err error
+		if entry.skipVlogAndSetThreshold(db.valueThreshold()) {
+			err = db.mt.Put(entry.Key, y.ValueStruct{
+				Value:     entry.Value,
+				Meta:      entry.meta &^ bitValuePointer,
+				UserMeta:  entry.UserMeta,
+				ExpiresAt: entry.ExpiresAt,
+			})
+		} else {
+			//writer pointer to memTable
+			err = db.mt.Put(entry.Key, y.ValueStruct{
+				Value:     b.Ptrs[i].Encode(),
+				Meta:      entry.meta | bitValuePointer,
+				UserMeta:  entry.UserMeta,
+				ExpiresAt: entry.ExpiresAt,
+			})
+		}
+
+		if err != nil {
+			return y.Wrapf(err, "while writing to memTable")
+		}
+	}
+
+	if db.opt.SyncWrites {
+		return db.mt.SyncWAL()
+	}
+
 	return nil
 }
 
 var errNoRoom = errors.New("No Room for write")
 
 func (db *DB) ensureRoomForWrite() error {
-	return nil
+	var err error
+	db.lock.Lock()
+	defer db.lock.Unlock()
+
+	y.AssertTrue(db.mt != nil)
+	if !db.mt.isFull() {
+		return nil
+	}
+
+	select {
+	//如果db的memTable channel中有值
+	case db.flushChan <- db.mt:
+		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n", db.mt.sl.MemSize(), len(db.flushChan))
+		db.imm = append(db.imm, db.mt)
+		db.mt, err = db.newMemTable()
+		if err != nil {
+			return y.Wrapf(err, "cannot create new mem table")
+		}
+		return nil
+	//	什么情况下会执行到default？
+	//flushChan 已满，无法接收新的刷盘任务,flushChan是个没有buffer channel
+	//系统负载过高，刷盘速度低于写入速度
+	//如果负责消费 flushChan 的后台刷盘协程意外退出或死锁，flushChan 会一直处于满状态,所有后续写入尝试都会直接走 default 分支
+	//即使 flushChan 未满，但如果后台刷盘协程因为某些原因（如磁盘 I/O 慢、资源竞争等）无法及时消费 flushChan 中的任务，也可能导致 flushChan 积压
+	default:
+		return errNoRoom
+	}
 }
 
 // DB 被调用后就会执行函数，用于一直监听事件.

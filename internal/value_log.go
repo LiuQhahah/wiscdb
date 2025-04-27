@@ -1,7 +1,9 @@
 package internal
 
 import (
+	"bytes"
 	"github.com/dgraph-io/ristretto/v2/z"
+	"os"
 	"sync"
 	"sync/atomic"
 	"wiscdb/y"
@@ -33,19 +35,137 @@ func (vlog *valueLog) Close() error {
 }
 
 func (vlog *valueLog) wOffset() uint32 {
-	return 0
+	return vlog.writableLogOffset.Load()
 }
 
 func (vlog *valueLog) validateWrites(reqs []*request) error {
 	return nil
 }
 
+// 将请求写到disk和
 func (vlog *valueLog) write(reqs []*request) error {
-	return nil
+	if vlog.db.opt.InMemory {
+		return nil
+	}
+	if err := vlog.validateWrites(reqs); err != nil {
+		return y.Wrapf(err, "while validating writes")
+	}
+	vlog.filesLock.RLock()
+	maxFid := vlog.maxFid
+	//key value map 存储的是value log file
+	curlf := vlog.filesMap[maxFid]
+	vlog.filesLock.RUnlock()
+	defer func() {
+		if vlog.opt.SyncWrites {
+			if err := curlf.Sync(); err != nil {
+				vlog.opt.Errorf("Error while curlf sync: %v\n", err)
+			}
+		}
+	}()
+
+	write := func(buf *bytes.Buffer) error {
+		if buf.Len() == 0 {
+			return nil
+		}
+		n := uint32(buf.Len())
+		endOffset := vlog.writableLogOffset.Add(n)
+		if int(endOffset) >= len(curlf.Data) {
+			if err := curlf.Truncate(int64(endOffset)); err != nil {
+				return err
+			}
+		}
+
+		start := int(endOffset - n)
+		//将buf存储到curlf的data中
+		y.AssertTrue(copy(curlf.Data[start:], buf.Bytes()) == int(n))
+
+		curlf.size.Store(endOffset)
+		return nil
+	}
+	//将value log写到磁盘中
+	toDisk := func() error {
+		if vlog.wOffset() > uint32(vlog.opt.ValueLogFileSize) || vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
+			if err := curlf.doneWriting(vlog.wOffset()); err != nil {
+				return err
+			}
+			newlf, err := vlog.createVlogFile()
+			if err != nil {
+				return err
+			}
+			curlf = newlf
+		}
+		return nil
+	}
+
+	buf := new(bytes.Buffer)
+	for i := range reqs {
+		b := reqs[i]
+		b.Ptrs = b.Ptrs[:0]
+		var written, bytesWritten int
+		valueSizes := make([]int64, 0, len(b.Entries))
+		for j := range b.Entries {
+			buf.Reset()
+			e := b.Entries[j]
+			valueSizes = append(valueSizes, int64(len(e.Value)))
+			if e.skipVlogAndSetThreshold(vlog.db.valueThreshold()) {
+				b.Ptrs = append(b.Ptrs, valuePointer{})
+				continue
+			}
+			var p valuePointer
+			p.Fid = curlf.fid
+			p.Offset = vlog.wOffset()
+			tmpMeta := e.meta
+			e.meta = e.meta &^ (bitTxn | bitFinTxn)
+			pLen, err := curlf.encodeEntry(buf, e, p.Offset)
+			if err != nil {
+				return err
+			}
+			e.meta = tmpMeta
+			p.Len = uint32(pLen)
+			b.Ptrs = append(b.Ptrs, p)
+			if err := write(buf); err != nil {
+				return err
+			}
+			written++
+			bytesWritten += buf.Len()
+		}
+		y.NumWritesVlogAdd(vlog.opt.MetricsEnabled, int64(written))
+		y.NumBytesWrittenVlogAdd(vlog.opt.MetricsEnabled, int64(bytesWritten))
+
+		vlog.numEntriesWritten += uint32(written)
+		vlog.db.threshold.update(valueSizes)
+
+		if err := toDisk(); err != nil {
+			return err
+		}
+	}
+
+	return toDisk()
 }
 
+// 创建一个新的value log file
 func (vlog *valueLog) createVlogFile() (*valueLogFile, error) {
-	return nil, nil
+	fid := vlog.maxFid + 1
+	path := vlog.fPath(fid)
+	vlogFile := &valueLogFile{
+		fid:      fid,
+		path:     path,
+		registry: vlog.db.registry,
+		writeAt:  vlogHeaderSize,
+		opt:      vlog.opt,
+	}
+	err := vlogFile.open(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 2*vlog.opt.ValueLogFileSize)
+	if err != z.NewFile && err != nil {
+		return nil, err
+	}
+	vlog.filesLock.Lock()
+	vlog.filesMap[fid] = vlogFile
+	y.AssertTrue(vlog.maxFid < fid)
+	vlog.maxFid = fid
+	vlog.writableLogOffset.Store(vlogHeaderSize)
+	vlog.numEntriesWritten = 0
+	vlog.filesLock.Unlock()
+	return vlogFile, nil
 }
 
 func estimateRequestSize(req *request) uint64 {
