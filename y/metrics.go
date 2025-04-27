@@ -6,6 +6,7 @@ var (
 	numIteratorsCreated *expvar.Int
 	numBytesWrittenUser *expvar.Int
 	numPuts             *expvar.Int
+	pendingWrites       *expvar.Map
 )
 
 const (
@@ -30,4 +31,15 @@ func NumBytesWrittenUserAdd(enabled bool, val int64) {
 }
 func NumPutsAdd(enabled bool, val int64) {
 	addInt(enabled, numPuts, val)
+}
+
+func PendingWritesSet(enabled bool, key string, val expvar.Var) {
+	storeToMap(enabled, pendingWrites, key, val)
+}
+
+func storeToMap(enabled bool, metric *expvar.Map, key string, value expvar.Var) {
+	if !enabled {
+		return
+	}
+	metric.Set(key, value)
 }

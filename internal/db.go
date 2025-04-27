@@ -3,14 +3,19 @@ package internal
 import (
 	"bytes"
 	"errors"
+	"expvar"
 	"fmt"
+	"github.com/dgraph-io/ristretto/v2"
 	"github.com/dgraph-io/ristretto/v2/z"
 	"math"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
+	"wiscdb/fb"
 	"wiscdb/level"
 	"wiscdb/skl"
+	"wiscdb/table"
 	"wiscdb/y"
 )
 
@@ -37,6 +42,11 @@ type DB struct {
 	orc         *oracle
 	blockWrites atomic.Int32
 	writeCh     chan *request
+	pub         *publisher
+	register    *KeyRegistry
+	blockCache  *ristretto.Cache[[]byte, *table.Block]
+	indexCache  *ristretto.Cache[uint64, *fb.TableIndex]
+	allocPool   *z.AllocatorPool
 }
 
 type closer struct {
@@ -235,3 +245,134 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 func (db *DB) StreamDB(outOptions Options) error {
 	return nil
 }
+
+func (db *DB) writeRequests(reqs []*request) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+	done := func(err error) {
+		for _, r := range reqs {
+			r.Err = err
+			r.Wg.Done()
+		}
+	}
+
+	db.opt.Debugf("writeRequests called. Writing to value log")
+	err := db.vlog.write(reqs)
+	if err != nil {
+		done(err)
+		return err
+	}
+
+	db.opt.Debugf("Writing to memtable")
+	var count int
+	for _, b := range reqs {
+		if len(b.Entries) == 0 {
+			continue
+		}
+		count += len(b.Entries)
+		var i uint64
+		var err error
+		for err = db.ensureRoomForWrite(); err == errNoRoom; err = db.ensureRoomForWrite() {
+			i++
+			for i%100 == 0 {
+				db.opt.Debugf("Making room for writes")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if err != nil {
+			done(err)
+			return y.Wrap(err, "writeRequests")
+		}
+		if err := db.writeToLSM(b); err != nil {
+			done(err)
+			return y.Wrap(err, "writeRequests")
+		}
+	}
+
+	db.opt.Debugf("Sending updates to subscribers")
+	db.pub.sendUpdates(reqs)
+	done(nil)
+	db.opt.Debugf("%s entries written", count)
+	return nil
+}
+
+func (db *DB) writeToLSM(b *request) error {
+	return nil
+}
+
+var errNoRoom = errors.New("No Room for write")
+
+func (db *DB) ensureRoomForWrite() error {
+	return nil
+}
+
+// DB 被调用后就会执行函数，用于一直监听事件.
+// 会通过协程来调用，不会阻塞主线程但是可以一直在后台执行
+func (db *DB) doWrites(lc *z.Closer) {
+	defer lc.Done()
+	pendingCh := make(chan struct{}, 1)
+	//创建一个闭包函数与直接调用db的writeRequests相比添加了一条处理完后返回pendingCh的输出
+	//pendingCh用来标识阻塞，成功后就可以返回表示处理完毕
+	writeRequests := func(reqs []*request) {
+		if err := db.writeRequests(reqs); err != nil {
+			db.opt.Errorf("writeRequests: %v", err)
+		}
+		//会一直阻塞知道pendingCh的channel中有数据
+		//有数据输出就会执行，没有数据就会一直等待.
+		<-pendingCh
+	}
+
+	reqLen := new(expvar.Int)
+	y.PendingWritesSet(db.opt.MetricsEnabled, db.opt.Dir, reqLen)
+	//初始化slice,超过10后会自动扩容
+	reqs := make([]*request, 0, 10)
+	for {
+		var r *request
+		select {
+		case r = <-db.writeCh: //writechan中有值就会做一个赋值处理,交给下面append来做
+		case <-lc.HasBeenClosed():
+			goto closedCase
+		}
+		for {
+			reqs = append(reqs, r)
+			//set metric
+			reqLen.Set(int64(len(reqs)))
+			//if reqs's length greater than 3000, will call write method
+			if len(reqs) >= 3*kvWriteChCapacity {
+				//第一个条件中的阻塞发送确保信号被接收后才会继续
+				pendingCh <- struct{}{}
+				goto writeCase
+			}
+			select {
+			case r = <-db.writeCh:
+			//	pendingCh是缓冲为1的通道，每次只能容纳一个信号
+			//第二个条件中的非阻塞发送确保不会重复发送
+			case pendingCh <- struct{}{}:
+				goto writeCase
+			case <-lc.HasBeenClosed():
+				goto closedCase
+			}
+		}
+	closedCase:
+		for {
+			select {
+			case r = <-db.writeCh:
+				reqs = append(reqs, r)
+			default:
+				pendingCh <- struct{}{}
+				writeRequests(reqs)
+				return
+			}
+		}
+	writeCase:
+		go writeRequests(reqs)
+		//new request
+		reqs = make([]*request, 10)
+		reqLen.Set(0)
+	}
+}
+
+const (
+	kvWriteChCapacity = 1000
+)

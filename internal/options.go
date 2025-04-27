@@ -105,6 +105,12 @@ func (opt *Options) Debugf(format string, v ...interface{}) {
 	opt.Logger.Debugf(format, v...)
 }
 
+func (opt *Options) Errorf(format string, v ...interface{}) {
+	if opt.Logger == nil {
+		return
+	}
+	opt.Logger.Errorf(format, v...)
+}
 func (opt *Options) Infof(format string, v ...interface{}) {
 	if opt.Logger == nil {
 		return
