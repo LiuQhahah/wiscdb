@@ -105,10 +105,12 @@ func (vlog *valueLog) write(reqs []*request) error {
 	toDisk := func() error {
 		//判断当前value log file的文件偏移量如果超过设置的value log则写道log file中
 		if vlog.wOffset() > uint32(vlog.opt.ValueLogFileSize) || vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
+			//完成一次文件落盘
 			if err := curlf.doneWriting(vlog.wOffset()); err != nil {
 				return err
 			}
-			newlf, err := vlog.createVlogFile()
+			//写完后就会创建新的文件此时文件id会+1
+			newlf, err := vlog.createValuelogFile()
 			if err != nil {
 				return err
 			}
@@ -165,7 +167,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 }
 
 // 创建一个新的value log file
-func (vlog *valueLog) createVlogFile() (*writeAheadLog, error) {
+func (vlog *valueLog) createValuelogFile() (*writeAheadLog, error) {
 	fid := vlog.maxFid + 1
 	path := vlog.fPath(fid)
 	vlogFile := &writeAheadLog{

@@ -122,6 +122,7 @@ func (vLogFile *writeAheadLog) keyID() uint64 {
 	return 0
 }
 
+// 执行完后，该文件id就结束了
 func (vLogFile *writeAheadLog) doneWriting(offset uint32) error {
 	if vLogFile.opt.SyncWrites {
 		if err := vLogFile.Sync(); err != nil {
