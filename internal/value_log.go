@@ -14,7 +14,7 @@ import (
 type valueLog struct {
 	dirPath            string
 	filesLock          sync.RWMutex
-	filesMap           map[uint32]*valueLogFile
+	filesMap           map[uint32]*writeAheadLog
 	maxFid             uint32
 	filesToBeDeleted   []uint32
 	numActiveIterators atomic.Int32
@@ -165,10 +165,10 @@ func (vlog *valueLog) write(reqs []*request) error {
 }
 
 // 创建一个新的value log file
-func (vlog *valueLog) createVlogFile() (*valueLogFile, error) {
+func (vlog *valueLog) createVlogFile() (*writeAheadLog, error) {
 	fid := vlog.maxFid + 1
 	path := vlog.fPath(fid)
-	vlogFile := &valueLogFile{
+	vlogFile := &writeAheadLog{
 		fid:      fid,
 		path:     path,
 		registry: vlog.db.registry,
@@ -210,12 +210,12 @@ func errFile(err error, path string, msg string) error {
 	return nil
 }
 
-func (vlog *valueLog) getFileRLocked(vp valuePointer) (*valueLogFile, error) {
-	return &valueLogFile{}, nil
+func (vlog *valueLog) getFileRLocked(vp valuePointer) (*writeAheadLog, error) {
+	return &writeAheadLog{}, nil
 }
 
-func (vlog *valueLog) readValueBytes(vp valuePointer) ([]byte, *valueLogFile, error) {
-	return nil, &valueLogFile{}, nil
+func (vlog *valueLog) readValueBytes(vp valuePointer) ([]byte, *writeAheadLog, error) {
+	return nil, &writeAheadLog{}, nil
 }
 
 func (vlog *valueLog) Read(vp valuePointer, _ *y.Slice) ([]byte, func(), error) {
@@ -227,7 +227,7 @@ func (vlog *valueLog) Read(vp valuePointer, _ *y.Slice) ([]byte, func(), error) 
 func runCallback(cb func()) {
 
 }
-func (vlog *valueLog) getUnlockCallback(lf *valueLogFile) func() {
+func (vlog *valueLog) getUnlockCallback(lf *writeAheadLog) func() {
 	return func() {
 
 	}
@@ -244,7 +244,7 @@ func (vlog *valueLog) decrIteratorCount() error {
 	vlog.filesLock.Lock()
 	//创建数组,数组长度是valuelog中将要被删除的文件数量
 	//数组中存储的是要被删除的文件的id
-	lfs := make([]*valueLogFile, 0, len(vlog.filesToBeDeleted))
+	lfs := make([]*writeAheadLog, 0, len(vlog.filesToBeDeleted))
 	for _, id := range vlog.filesToBeDeleted {
 		lfs = append(lfs, vlog.filesMap[id])
 		//使用go自带的删除函数
@@ -264,7 +264,7 @@ func (vlog *valueLog) decrIteratorCount() error {
 }
 
 // 将value log文件写discardStats中
-func (vlog *valueLog) deleteLogFile(lf *valueLogFile) error {
+func (vlog *valueLog) deleteLogFile(lf *writeAheadLog) error {
 	if lf == nil {
 		return nil
 	}
@@ -306,11 +306,11 @@ func (vlog *valueLog) runGC(discardRatio float64) error {
 	return nil
 }
 
-func (vlog *valueLog) doRunGC(lf *valueLogFile) error {
+func (vlog *valueLog) doRunGC(lf *writeAheadLog) error {
 	return nil
 }
 
-func (vlog *valueLog) rewrite(f *valueLogFile) error {
+func (vlog *valueLog) rewrite(f *writeAheadLog) error {
 	return nil
 }
 
@@ -322,6 +322,6 @@ func discardEntry(e Entry, vs y.ValueStruct, db *DB) bool {
 	return false
 }
 
-func (vlog *valueLog) pickLog(discardRatio float64) *valueLogFile {
-	return &valueLogFile{}
+func (vlog *valueLog) pickLog(discardRatio float64) *writeAheadLog {
+	return &writeAheadLog{}
 }

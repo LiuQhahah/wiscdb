@@ -77,7 +77,7 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 		opt: db.opt,
 		buf: &bytes.Buffer{},
 	}
-	memtable.wal = &valueLogFile{
+	memtable.wal = &writeAheadLog{
 		path:     filePath,
 		fid:      uint32(fid),
 		opt:      db.opt,

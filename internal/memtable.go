@@ -9,7 +9,7 @@ import (
 
 type memTable struct {
 	sl         *skl.SkipList
-	wal        *valueLogFile
+	wal        *writeAheadLog
 	maxVersion uint64
 	opt        Options
 	buf        *bytes.Buffer

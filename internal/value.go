@@ -63,7 +63,7 @@ type safeRead struct {
 	k            []byte
 	v            []byte
 	recordOffset uint32
-	vLogFile     *valueLogFile // safeRead包含value log的file，是真正意义上的存储数据的地方
+	vLogFile     *writeAheadLog // safeRead包含value log的file，是真正意义上的存储数据的地方
 }
 
 // return entry

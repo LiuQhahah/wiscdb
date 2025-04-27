@@ -17,7 +17,7 @@ import (
 	"wiscdb/y"
 )
 
-type valueLogFile struct {
+type writeAheadLog struct {
 	*z.MmapFile
 	path     string
 	lock     sync.RWMutex
@@ -34,7 +34,7 @@ type valueLogFile struct {
 *
 传入
 */
-func (vLogFile *valueLogFile) Truncate(end int64) error {
+func (vLogFile *writeAheadLog) Truncate(end int64) error {
 	if fi, err := vLogFile.Fd.Stat(); err != nil {
 		return fmt.Errorf("while file.stat on file: %s,error: %v\n", vLogFile.Fd.Name(), err)
 	} else if fi.Size() == end {
@@ -49,7 +49,7 @@ func (vLogFile *valueLogFile) Truncate(end int64) error {
 }
 
 // 对entry进行编码
-func (vLogFile *valueLogFile) encodeEntry(buf *bytes.Buffer, e *Entry, offset uint32) (int, error) {
+func (vLogFile *writeAheadLog) encodeEntry(buf *bytes.Buffer, e *Entry, offset uint32) (int, error) {
 	h := header{
 		kLen:      uint32(len(e.Key)),
 		vLen:      uint32(len(e.Value)),
@@ -90,21 +90,21 @@ func (vLogFile *valueLogFile) encodeEntry(buf *bytes.Buffer, e *Entry, offset ui
 	return len(headerEnc[:sz]) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
-func (vLogFile *valueLogFile) writeEntry(buf *bytes.Buffer, e *Entry, opt Options) error {
+func (vLogFile *writeAheadLog) writeEntry(buf *bytes.Buffer, e *Entry, opt Options) error {
 	return nil
 }
 
-func (vLogFile *valueLogFile) encryptionEnabled() bool {
+func (vLogFile *writeAheadLog) encryptionEnabled() bool {
 	return vLogFile.dataKey != nil
 }
 
-func (vLogFile *valueLogFile) zeroNextEntry() {
+func (vLogFile *writeAheadLog) zeroNextEntry() {
 
 }
 
 // IV指的是 Initialization vector
 // 16个字节数组中存储内容是，前12个字节存储的baseIV的值，后四个字节存储的偏移量
-func (vLogFile *valueLogFile) generateIV(offset uint32) []byte {
+func (vLogFile *writeAheadLog) generateIV(offset uint32) []byte {
 	iv := make([]byte, aes.BlockSize)
 	//前12个字节用来存储baseIV
 	y.AssertTrue(12 == copy(iv[:12], vLogFile.baseIV))
@@ -114,15 +114,15 @@ func (vLogFile *valueLogFile) generateIV(offset uint32) []byte {
 }
 
 // 对KV进行解密
-func (vLogFile *valueLogFile) decryptKV(buf []byte, offset uint32) ([]byte, error) {
+func (vLogFile *writeAheadLog) decryptKV(buf []byte, offset uint32) ([]byte, error) {
 	return y.XORBlockAllocate(buf, vLogFile.dataKey.Data, vLogFile.generateIV(offset))
 }
 
-func (vLogFile *valueLogFile) keyID() uint64 {
+func (vLogFile *writeAheadLog) keyID() uint64 {
 	return 0
 }
 
-func (vLogFile *valueLogFile) doneWriting(offset uint32) error {
+func (vLogFile *writeAheadLog) doneWriting(offset uint32) error {
 	if vLogFile.opt.SyncWrites {
 		if err := vLogFile.Sync(); err != nil {
 			return y.Wrapf(err, "Unable to sync value log: %q", vLogFile.path)
@@ -136,7 +136,7 @@ func (vLogFile *valueLogFile) doneWriting(offset uint32) error {
 	return nil
 }
 
-func (vLogFile *valueLogFile) open(path string, flags int, fSize int64) error {
+func (vLogFile *writeAheadLog) open(path string, flags int, fSize int64) error {
 	return nil
 }
 
@@ -145,7 +145,7 @@ var errTruncate = errors.New("Do truncate")
 // 指的是vlog file存储的是value中的实际内容
 // 输入 offset指的是从哪个位置开始迭代、可以从头开始迭代，logEntry是个函数用于执行具体迭代工作
 // 输出
-func (vLogFile *valueLogFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint32, error) {
+func (vLogFile *writeAheadLog) iterate(readOnly bool, offset uint32, fn logEntry) (uint32, error) {
 	//如果偏移量为0 表明从头开始迭代，但是在valuelog中头并不是0，而是从文件headersize开始后读取，
 	//用20个字节来描述文件头，包含魔数等信息
 	if offset == 0 {
@@ -250,10 +250,10 @@ loop:
 
 var errStop = errors.New("Stop iteration")
 
-func (vLogFile *valueLogFile) bootstrap() error {
+func (vLogFile *writeAheadLog) bootstrap() error {
 	return nil
 }
 
-func (vLogFile *valueLogFile) read(p valuePointer) (buf []byte, err error) {
+func (vLogFile *writeAheadLog) read(p valuePointer) (buf []byte, err error) {
 	return nil, nil
 }
