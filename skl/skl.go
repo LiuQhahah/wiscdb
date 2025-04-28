@@ -42,7 +42,7 @@ type node struct {
 	keyOffset uint32            //存储key的偏移量
 	keySize   uint16            //存储key的大小
 	height    uint16            //存储高度
-	tower     [18]atomic.Uint32 // tower的含义
+	tower     [18]atomic.Uint32 // tower的含义: 存储偏移量
 }
 
 // 内存分配中的分配区概念
@@ -104,6 +104,7 @@ func (s *Arena) putKey(key []byte) uint32 {
 }
 
 // 根据偏移量返回node struct
+// 根据 便宜量使用unsafe解析处node struct
 func (s *Arena) getNode(offset uint32) *node {
 	if offset == 0 {
 		return nil
@@ -194,6 +195,8 @@ func (s *node) setValue(arena *Arena, v y.ValueStruct) {
 }
 
 // h指的是链表的高度，
+// 根据高度得到当前层次的偏移量
+// 偏移量存储在node的tower中
 func (s *node) getNextOffset(h int) uint32 {
 	return s.tower[h].Load()
 }
@@ -327,8 +330,27 @@ func (s *SkipList) Empty() bool {
 	return false
 }
 
+// 返回最后一个元素,从跳表中返回node
 func (s *SkipList) findLast() *node {
-	return nil
+	n := s.head
+	//从最高层遍历
+	level := int(s.getHeight()) - 1
+	for {
+		//根据层次找到下一个node，然后持续调用Next
+		next := s.getNext(n, level)
+		if next != nil {
+			n = next
+			continue
+		}
+		//当level为0时并且就是跳表中第0层最后一个node
+		if level == 0 {
+			if n == s.head {
+				return nil
+			}
+			return n
+		}
+		level--
+	}
 }
 
 func (s *SkipList) Get(key []byte) y.ValueStruct {
@@ -395,11 +417,11 @@ func (i *Iterator) SeekForPrev(target []byte) {
 }
 
 func (i *Iterator) SeekToFirst() {
-
+	i.n = i.list.getNext(i.list.head, 0)
 }
 
 func (i *Iterator) SeekToLast() {
-
+	i.n = i.list.findLast()
 }
 
 func (i *Iterator) NewIterator() *Iterator {
