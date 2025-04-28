@@ -24,6 +24,10 @@ type KeyRegistryOptions struct {
 	InMemory                      bool
 }
 
+func (kr *KeyRegistry) LatestDataKey() (*pb.DataKey, error) {
+	return nil, nil
+}
+
 func (kr *KeyRegistry) DataKey(id uint64) (*pb.DataKey, error) {
 	return nil, nil
 }

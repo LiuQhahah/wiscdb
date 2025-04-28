@@ -3,6 +3,7 @@ package level
 import (
 	"github.com/dgraph-io/ristretto/v2/z"
 	"sync/atomic"
+	"time"
 	"wiscdb/internal"
 	"wiscdb/pb"
 	"wiscdb/table"
@@ -21,6 +22,10 @@ func newLevelController(db *internal.DB, mf *internal.Manifest) (*LevelsControll
 	return &LevelsController{}, nil
 }
 
+func (s *LevelsController) ReserveFileID() uint64 {
+	return 0
+}
+
 func (s *LevelsController) close() error {
 	return nil
 }
@@ -29,8 +34,28 @@ func (s *LevelsController) cleanupLevels() error {
 	return nil
 }
 
-func (s *LevelsController) addLevel0Table(t *table.Table) {
+func (s *LevelsController) AddLevel0Table(t *table.Table) error {
+	if !t.IsInMemory {
+		err := s.kv.Manifest.AddChanges([]*pb.ManifestChange{
+			internal.NewCreateChange(t.ID(), 0, t.KeyID(), t.CompressionType()),
+		})
+		if err != nil {
+			return err
+		}
+	}
 
+	for !s.levels[0].tryAddLevel0Table(t) {
+		timeStart := time.Now()
+		for s.levels[0].numTables() >= s.kv.Opt.NumLevelZeroTablesStall {
+			time.Sleep(10 * time.Millisecond)
+		}
+		dur := time.Since(timeStart)
+		if dur > time.Second {
+			s.kv.Opt.Infof("L0 was stalled for %s\n", dur.Round(time.Millisecond))
+		}
+		s.l0stallMs.Add(int64(dur.Round(time.Millisecond)))
+	}
+	return nil
 }
 
 func (s *LevelsController) startCompact(lc *z.Closer) {
@@ -135,4 +160,8 @@ func (s *LevelsController) verifyChecksum() error {
 
 func (s *LevelsController) AppendIterators(iters []y.Iterator, opt *internal.IteratorOptions) []y.Iterator {
 	return nil
+}
+
+func HasAnyPrefixes(s []byte, listOfPrefixes [][]byte) bool {
+	return false
 }

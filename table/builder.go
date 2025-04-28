@@ -137,6 +137,10 @@ func (b *Builder) Opts() *Options {
 	return nil
 }
 
+func (b *Builder) Close() {
+
+}
+
 type bblock struct {
 	data         []byte
 	baseKey      []byte

@@ -37,7 +37,7 @@ func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
 func (txn *Txn) checkTransactionCountAndSize(e *Entry) error {
 	count := txn.count + 1
 	size := txn.size + e.estimateSizeAndSetThreshold(txn.db.valueThreshold()) + 10
-	if count >= txn.db.opt.maxBatchCount || size >= txn.db.opt.maxBatchSize {
+	if count >= txn.db.Opt.maxBatchCount || size >= txn.db.Opt.maxBatchSize {
 		return ErrTxnTooBig
 	}
 	txn.count, txn.size = count, size
@@ -71,9 +71,9 @@ func (txn *Txn) modify(e *Entry) error {
 		return ErrInvalidKey
 	case len(e.Key) > maxKeySize:
 		return exceedsSize("Key", maxKeySize, e.Key)
-	case int64(len(e.Value)) > txn.db.opt.ValueLogFileSize:
-		return exceedsSize("Value", txn.db.opt.ValueLogFileSize, e.Key)
-	case txn.db.opt.InMemory && int64(len(e.Value)) > txn.db.valueThreshold():
+	case int64(len(e.Value)) > txn.db.Opt.ValueLogFileSize:
+		return exceedsSize("Value", txn.db.Opt.ValueLogFileSize, e.Key)
+	case txn.db.Opt.InMemory && int64(len(e.Value)) > txn.db.valueThreshold():
 		return exceedsSize("Value", txn.db.valueThreshold(), e.Value)
 	}
 
@@ -84,7 +84,7 @@ func (txn *Txn) modify(e *Entry) error {
 		return err
 	}
 
-	if txn.db.opt.DetectConflicts {
+	if txn.db.Opt.DetectConflicts {
 		fp := z.MemHash(e.Key)
 		txn.conflictKeys[fp] = struct{}{}
 	}
@@ -177,7 +177,7 @@ func (txn *Txn) commitPreCheck() error {
 			keepTogether = false
 		}
 	}
-	if keepTogether && txn.db.opt.managedTxns && txn.commitTs == 0 {
+	if keepTogether && txn.db.Opt.managedTxns && txn.commitTs == 0 {
 		return errors.New("CommitTs cannot be zero. Please use commitAt instead")
 	}
 	return nil
@@ -231,7 +231,7 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	if txn.db.IsClosed() {
 		panic(ErrDBClosed)
 	}
-	y.NumIteratorsCreatedAdd(txn.db.opt.MetricsEnabled, 1)
+	y.NumIteratorsCreatedAdd(txn.db.Opt.MetricsEnabled, 1)
 
 	//创建迭代器时，将事务中迭代器加1
 	txn.numIterators.Add(1)

@@ -54,7 +54,18 @@ func (s *levelHandler) sortTables() {
 
 }
 func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
-	return false
+	y.AssertTrue(s.level == 0)
+	s.Lock()
+	defer s.Unlock()
+	if len(s.tables) >= s.db.Opt.NumLevelZeroTablesStall {
+		return false
+	}
+	//tables中会存储多张table
+	s.tables = append(s.tables, t)
+	t.IncrRef()
+	s.addSize(t)
+
+	return true
 }
 func (s *levelHandler) numTables() int {
 	return 0

@@ -7,4 +7,5 @@ type Iterator interface {
 	Value() ValueStruct
 	Valid() bool
 	Close() error
+	Key() []byte
 }

@@ -336,13 +336,24 @@ func (s *SkipList) Get(key []byte) y.ValueStruct {
 }
 
 func (s *SkipList) IncrRef() {
-
+	s.ref.Add(1)
 }
 
+// 回收资源
 func (s *SkipList) DecrRef() {
+	newRef := s.ref.Add(-1)
+	if newRef > 0 {
+		return
+	}
+	if s.OnClose != nil {
+		s.OnClose()
+	}
+	s.arena = nil
+	s.head = nil
 
 }
 
+// TODO: Iterator的作用
 type Iterator struct {
 	list *SkipList
 	n    *node
@@ -395,15 +406,27 @@ func (i *Iterator) NewIterator() *Iterator {
 	return &Iterator{}
 }
 
+func (s *UniIterator) Rewind() {
+
+}
+
 type UniIterator struct {
 	iter     *Iterator
 	reversed bool
 }
 
+// 包装了一层，利用参数reversed来数据是顺序还是逆序
 func (s *SkipList) NewUniIterator(reversed bool) *UniIterator {
-	return &UniIterator{}
+	return &UniIterator{
+		iter:     s.NewIterator(),
+		reversed: reversed,
+	}
 }
 
+func (s *SkipList) NewIterator() *Iterator {
+	s.IncrRef()
+	return &Iterator{list: s}
+}
 func (s *UniIterator) Next() {
 
 }
