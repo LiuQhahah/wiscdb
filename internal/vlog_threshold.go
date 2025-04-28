@@ -22,8 +22,10 @@ func initVlogThreshold(opt *Options) *vlogThreshold {
 func (v *vlogThreshold) Clear(opt Options) {
 
 }
-func (v *vlogThreshold) update(sizes []int64) {
 
+// 将当前valuelog的文件长度写到value channel中
+func (v *vlogThreshold) update(sizes []int64) {
+	v.valueCh <- sizes
 }
 func (v *vlogThreshold) close() {
 

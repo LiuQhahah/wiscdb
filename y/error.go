@@ -37,6 +37,9 @@ func U32ToBytes(v uint32) (val []byte) {
 	return
 }
 
+func Check2(_ interface{}, err error) {
+	Check(err)
+}
 func Check(err error) {
 	if err != nil {
 	}

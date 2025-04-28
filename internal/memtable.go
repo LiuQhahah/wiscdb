@@ -9,17 +9,48 @@ import (
 
 type memTable struct {
 	sl         *skl.SkipList
-	wal        *valueLogFile
+	wal        *writeAheadLog
 	maxVersion uint64
 	opt        Options
 	buf        *bytes.Buffer
 }
 
 func (mt *memTable) isFull() bool {
-	return false
+	if mt.sl.MemSize() >= mt.opt.MemTableSize {
+		return true
+	}
+	if mt.opt.InMemory {
+		return false
+	}
+	return int64(mt.wal.writeAt) >= mt.opt.MemTableSize
 }
 
+// 将key value写到skiplist中
 func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
+	entry := &Entry{
+		Key:       key,
+		Value:     value.Value,
+		UserMeta:  value.UserMeta,
+		meta:      value.Meta,
+		ExpiresAt: value.ExpiresAt,
+	}
+	if mt.wal != nil {
+		if err := mt.wal.writeEntry(mt.buf, entry, mt.opt); err != nil {
+			return y.Wrapf(err, "cannot write entry to WAL file")
+		}
+	}
+
+	if entry.meta&bitFinTxn > 0 {
+		return nil
+	}
+
+	mt.sl.Put(key, value)
+
+	//更新下version
+	if ts := y.ParseTs(entry.Key); ts > mt.maxVersion {
+		mt.maxVersion = ts
+	}
+	y.NumBytesWrittenToL0Add(mt.opt.MetricsEnabled, entry.estimateSizeAndSetThreshold(mt.opt.ValueThreshold))
 	return nil
 }
 
@@ -71,7 +102,7 @@ func (mt *memTable) UpdateSkipList() error {
 }
 
 func (mt *memTable) SyncWAL() error {
-	return nil
+	return mt.wal.Sync()
 }
 
 // const有type 和untype之分,加了string指的是有typeed的constant.
