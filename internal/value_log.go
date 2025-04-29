@@ -64,7 +64,7 @@ func (vlog *valueLog) validateWrites(reqs []*request) error {
 
 // 将请求写到disk和
 func (vlog *valueLog) write(reqs []*request) error {
-	if vlog.db.opt.InMemory {
+	if vlog.db.Opt.InMemory {
 		return nil
 	}
 	if err := vlog.validateWrites(reqs); err != nil {

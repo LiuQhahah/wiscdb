@@ -3,6 +3,7 @@ package internal
 import (
 	"os"
 	"sync"
+	"wiscdb/options"
 	"wiscdb/pb"
 )
 
@@ -28,10 +29,20 @@ func (mf *manifestFile) close() error {
 	return nil
 }
 
-func (mf *manifestFile) addChanges(changeParam []*pb.ManifestChange) error {
+func (mf *manifestFile) AddChanges(changeParam []*pb.ManifestChange) error {
 	return nil
 }
 
+func NewCreateChange(id uint64, level int, keyID uint64, c options.CompressionType) *pb.ManifestChange {
+	return &pb.ManifestChange{
+		Id:             id,
+		Op:             pb.ManifestChange_CREATE,
+		Level:          uint32(level),
+		KeyId:          keyID,
+		EncryptionAlgo: pb.EncryptionAlgo_aes,
+		Compression:    uint32(c),
+	}
+}
 func (mf *manifestFile) rewrite() error {
 	return nil
 }

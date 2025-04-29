@@ -36,18 +36,22 @@ type Table struct {
 }
 
 type Options struct {
-	ReadOnly           bool
-	MetricsEnabled     bool
-	TableSize          uint64
-	tableCapacity      uint64
-	ChkMode            options.ChecksumVerificationMode
-	BloomFalsePositive float64
-	BlockSize          int
-	DataKey            *pb.DataKey
-	Compression        options.CompressionType
-	BlockCache         *ristretto.Cache[[]byte, *Block]
+	ReadOnly             bool
+	MetricsEnabled       bool
+	TableSize            uint64
+	tableCapacity        uint64
+	ChkMode              options.ChecksumVerificationMode
+	BloomFalsePositive   float64
+	BlockSize            int
+	DataKey              *pb.DataKey // TODO: DataKey的作用
+	Compression          options.CompressionType
+	BlockCache           *ristretto.Cache[[]byte, *Block]
+	IndexCache           *ristretto.Cache[uint64, *fb.TableIndex]
+	AllocPool            *z.AllocatorPool
+	ZSTDCompressionLevel int
 }
 
+// TODO: cheapIndex的作用是什么
 type cheapIndex struct {
 	MaxVersion        uint64
 	KeyCount          uint32
@@ -211,4 +215,49 @@ func NewFileName(id uint64, dir string) string {
 
 func IDToFilename(id uint64) string {
 	return ""
+}
+
+func (t *Table) IncrRef() {
+	t.ref.Add(1)
+}
+
+// 垃圾回收，如果该表没有被引用，那么就会从内存中回收
+func (t *Table) DecrRef() error {
+	newRef := t.ref.Add(-1)
+	if newRef == 0 {
+		//	GC
+		//从缓存中删除key
+		for i := 0; i < t.offsetsLength(); i++ {
+			t.opt.BlockCache.Del(t.blockCacheKey(i))
+		}
+		if err := t.Delete(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (t *Table) blockCacheKey(idx int) []byte {
+	return nil
+}
+func (t *Table) offsetsLength() int {
+	return 0
+}
+
+func (t *Table) cheapIndex() *cheapIndex {
+	return t._cheap
+}
+
+func (t *Table) ID() uint64 {
+	return t.id
+}
+
+func (t *Table) KeyID() uint64 {
+	if t.opt.DataKey != nil {
+		return t.opt.DataKey.KeyId
+	}
+	return 0
+}
+func (t *Table) CompressionType() options.CompressionType {
+	return t.opt.Compression
 }

@@ -32,7 +32,7 @@ type DB struct {
 	valueDisGuard *directoryLockGuard
 	closers       closer
 	mt            *memTable
-	opt           Options
+	Opt           Options
 	registry      *KeyRegistry
 	imm           []*memTable
 	vlog          valueLog
@@ -48,6 +48,7 @@ type DB struct {
 	blockCache  *ristretto.Cache[[]byte, *table.Block]
 	indexCache  *ristretto.Cache[uint64, *fb.TableIndex]
 	allocPool   *z.AllocatorPool
+	Manifest    *manifestFile
 }
 
 type closer struct {
@@ -71,21 +72,21 @@ func (db *DB) newMemTable() (*memTable, error) {
 // create/create memtable with file id.
 func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 	filePath := db.getFilePathWithFid(fid)
-	s := skl.NewSkipList(arenaSize(db.opt))
+	s := skl.NewSkipList(arenaSize(db.Opt))
 	memtable := &memTable{
 		sl:  s,
-		opt: db.opt,
+		opt: db.Opt,
 		buf: &bytes.Buffer{},
 	}
 	memtable.wal = &writeAheadLog{
 		path:     filePath,
 		fid:      uint32(fid),
-		opt:      db.opt,
+		opt:      db.Opt,
 		writeAt:  vlogHeaderSize,
 		registry: db.registry,
 	}
 	//open write ahead log
-	walError := memtable.wal.open(filePath, flags, 2*db.opt.MemTableSize)
+	walError := memtable.wal.open(filePath, flags, 2*db.Opt.MemTableSize)
 	if walError != nil && !errors.Is(walError, z.NewFile) {
 		return nil, y.Wrapf(walError, "While opening memtable: %s", filePath)
 	}
@@ -102,7 +103,7 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 // 2. fmt package
 // 3. const memTableExt:=".mem"
 func (db *DB) getFilePathWithFid(fid int) string {
-	return filepath.Join(db.opt.Dir, fmt.Sprintf("%05d%s", fid, memFileExt))
+	return filepath.Join(db.Opt.Dir, fmt.Sprintf("%05d%s", fid, memFileExt))
 }
 
 // DB的view函数用于查看DB中的值
@@ -111,7 +112,7 @@ func (db *DB) View(fb func(txn *Txn) error) error {
 		return ErrDBClosed
 	}
 	var txn *Txn
-	if db.opt.managedTxns {
+	if db.Opt.managedTxns {
 		txn = db.NewTransactionAt(math.MaxUint64, false)
 	} else {
 		txn = db.NewTransaction(false)
@@ -121,7 +122,7 @@ func (db *DB) View(fb func(txn *Txn) error) error {
 }
 
 func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
-	if !db.opt.managedTxns {
+	if !db.Opt.managedTxns {
 		panic("Cannot use NewTransactionAt with managedDB=false, use NewTransaction instead")
 	}
 	txn := db.newTransaction(update, true)
@@ -171,8 +172,8 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 		size += e.estimateSizeAndSetThreshold(db.valueThreshold())
 		count++
 	}
-	y.NumBytesWrittenUserAdd(db.opt.MetricsEnabled, size)
-	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
+	y.NumBytesWrittenUserAdd(db.Opt.MetricsEnabled, size)
+	if count >= db.Opt.maxBatchCount || size >= db.Opt.maxBatchSize {
 		return nil, ErrTxnTooBig
 	}
 	req := requestPool.Get().(*request)
@@ -181,7 +182,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	req.Wg.Add(1)
 	req.IncrRef()
 	db.writeCh <- req
-	y.NumPutsAdd(db.opt.MetricsEnabled, int64(len(entries)))
+	y.NumPutsAdd(db.Opt.MetricsEnabled, int64(len(entries)))
 	return req, nil
 }
 
@@ -224,7 +225,7 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 	defer db.lock.RUnlock()
 
 	var memTables []*memTable
-	if !db.opt.ReadOnly {
+	if !db.Opt.ReadOnly {
 		memTables = append(memTables, db.mt)
 		db.mt.IncrRef()
 	}
@@ -258,7 +259,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 	}
 
-	db.opt.Debugf("writeRequests called. Writing to value log")
+	db.Opt.Debugf("writeRequests called. Writing to value log")
 	// TODO: 没有得到是否写到本地文件中
 	err := db.vlog.write(reqs)
 	if err != nil {
@@ -266,7 +267,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 		return err
 	}
 
-	db.opt.Debugf("Writing to memtable")
+	db.Opt.Debugf("Writing to memtable")
 	var count int
 	for _, b := range reqs {
 		if len(b.Entries) == 0 {
@@ -278,7 +279,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 		for err = db.ensureRoomForWrite(); err == errNoRoom; err = db.ensureRoomForWrite() {
 			i++
 			for i%100 == 0 {
-				db.opt.Debugf("Making room for writes")
+				db.Opt.Debugf("Making room for writes")
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -292,15 +293,15 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 	}
 
-	db.opt.Debugf("Sending updates to subscribers")
+	db.Opt.Debugf("Sending updates to subscribers")
 	db.pub.sendUpdates(reqs)
 	done(nil)
-	db.opt.Debugf("%s entries written", count)
+	db.Opt.Debugf("%s entries written", count)
 	return nil
 }
 
 func (db *DB) writeToLSM(b *request) error {
-	if !db.opt.InMemory && len(b.Ptrs) != len(b.Entries) {
+	if !db.Opt.InMemory && len(b.Ptrs) != len(b.Entries) {
 		errMessage := fmt.Sprintf("Ptrs and Entries don't match: %+v", b)
 		return errors.New(errMessage)
 	}
@@ -328,7 +329,7 @@ func (db *DB) writeToLSM(b *request) error {
 		}
 	}
 
-	if db.opt.SyncWrites {
+	if db.Opt.SyncWrites {
 		return db.mt.SyncWAL()
 	}
 
@@ -350,8 +351,9 @@ func (db *DB) ensureRoomForWrite() error {
 	select {
 	//如果db的memTable channel中有值
 	case db.flushChan <- db.mt:
-		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n", db.mt.sl.MemSize(), len(db.flushChan))
+		db.Opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n", db.mt.sl.MemSize(), len(db.flushChan))
 		db.imm = append(db.imm, db.mt)
+		//将memtable的值写到flushchan中，同事创建新的memtable
 		db.mt, err = db.newMemTable()
 		if err != nil {
 			return y.Wrapf(err, "cannot create new mem table")
@@ -376,7 +378,7 @@ func (db *DB) doWrites(lc *z.Closer) {
 	//pendingCh用来标识阻塞，成功后就可以返回表示处理完毕
 	writeRequests := func(reqs []*request) {
 		if err := db.writeRequests(reqs); err != nil {
-			db.opt.Errorf("writeRequests: %v", err)
+			db.Opt.Errorf("writeRequests: %v", err)
 		}
 		//会一直阻塞知道pendingCh的channel中有数据
 		//有数据输出就会执行，没有数据就会一直等待.
@@ -384,7 +386,7 @@ func (db *DB) doWrites(lc *z.Closer) {
 	}
 
 	reqLen := new(expvar.Int)
-	y.PendingWritesSet(db.opt.MetricsEnabled, db.opt.Dir, reqLen)
+	y.PendingWritesSet(db.Opt.MetricsEnabled, db.Opt.Dir, reqLen)
 	//初始化slice,超过10后会自动扩容
 	reqs := make([]*request, 0, 10)
 	for {
@@ -436,3 +438,94 @@ func (db *DB) doWrites(lc *z.Closer) {
 const (
 	kvWriteChCapacity = 1000
 )
+
+// 会被go goroutine调用作为一个后台一直执行的协程在运行.
+func (db *DB) flushMemTable(lc *z.Closer) {
+	defer lc.Done()
+	for mt := range db.flushChan {
+		if mt == nil {
+			continue
+		}
+		for {
+			if err := db.handleMemTableFlush(mt, nil); err != nil {
+				db.Opt.Errorf("error flushing memtable to disk: %v, retrying", err)
+				time.Sleep(time.Second)
+				continue
+			}
+			db.lock.Lock()
+			//将memTable的内容写到immutable中
+			y.AssertTrue(mt == db.imm[0])
+			//更新immutable
+			db.imm = db.imm[1:]
+			mt.DecrRef()
+			db.lock.Unlock()
+			break
+		}
+	}
+}
+
+func (db *DB) handleMemTableFlush(mt *memTable, dropPrefixes [][]byte) error {
+	bOpts := buildTableOptions(db)
+	itr := mt.sl.NewUniIterator(false)
+	builder := buildL0Table(itr, nil, bOpts)
+	defer builder.Close()
+
+	if builder.Empty() {
+		builder.Finish()
+		return nil
+	}
+	fileID := db.lc.ReserveFileID()
+	var tbl *table.Table
+	var err error
+	if db.Opt.InMemory {
+		data := builder.Finish()
+		tbl, err = table.OpenInMemoryTable(data, fileID, &bOpts)
+	} else {
+		tbl, err = table.CreateTable(table.NewFileName(fileID, db.Opt.Dir), builder)
+	}
+	if err != nil {
+		return y.Wrapf(err, "error while creating table")
+	}
+
+	//将memTable的table加到Level 0中
+	err = db.lc.AddLevel0Table(tbl)
+	_ = tbl.DecrRef()
+
+	return err
+}
+
+func buildL0Table(iter y.Iterator, dropPrefixes [][]byte, bOpts table.Options) *table.Builder {
+	defer iter.Close()
+	b := table.NewTableBuilder(bOpts)
+	for iter.ReWind(); iter.Valid(); iter.Next() {
+		if len(dropPrefixes) > 0 && level.HasAnyPrefixes(iter.Key(), dropPrefixes) {
+			continue
+		}
+		vs := iter.Value()
+		var vp valuePointer
+		if vs.Meta&bitValuePointer > 0 {
+			vp.Decode(vs.Value)
+		}
+		b.Add(iter.Key(), iter.Value(), vp.Len)
+	}
+	return b
+}
+func buildTableOptions(db *DB) table.Options {
+	opt := db.Opt
+	dk, err := db.registry.LatestDataKey()
+	y.Check(err)
+	return table.Options{
+		ReadOnly:             opt.ReadOnly,
+		MetricsEnabled:       db.Opt.MetricsEnabled,
+		TableSize:            uint64(opt.BaseTableSize),
+		BlockSize:            opt.BlockSize,
+		BloomFalsePositive:   opt.BloomFalsePositive,
+		ChkMode:              opt.ChecksumVerificationMode,
+		Compression:          opt.Compression,
+		ZSTDCompressionLevel: opt.ZSTDCompressionLevel,
+		BlockCache:           db.blockCache,
+		IndexCache:           db.indexCache,
+		AllocPool:            db.allocPool,
+		DataKey:              dk,
+	}
+}
