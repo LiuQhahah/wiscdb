@@ -489,14 +489,14 @@ func (db *DB) handleMemTableFlush(mt *memTable, dropPrefixes [][]byte) error {
 	defer builder.Close()
 
 	if builder.Empty() {
-		builder.Finish()
+		builder.CutDownBuilder()
 		return nil
 	}
 	fileID := db.lc.ReserveFileID()
 	var tbl *table.Table
 	var err error
 	if db.Opt.InMemory {
-		data := builder.Finish()
+		data := builder.CutDownBuilder()
 		tbl, err = table.OpenInMemoryTable(data, fileID, &bOpts)
 	} else {
 		//创建table
@@ -522,7 +522,9 @@ func buildL0Table(iter y.Iterator, dropPrefixes [][]byte, bOpts table.Options) *
 		}
 		vs := iter.Value()
 		var vp valuePointer
+		//判断当前value是存储的是值还是value的地址
 		if vs.Meta&bitValuePointer > 0 {
+			//如果是地址还需要解码
 			vp.Decode(vs.Value)
 		}
 		//从迭代器中得到key value写到table builder中

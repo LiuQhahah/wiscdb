@@ -47,3 +47,13 @@ func (itr *blockIterator) seekToFirst() {
 func (itr *blockIterator) seekToLast() {
 
 }
+func (itr *Iterator) Close() error {
+	return nil
+}
+func (itr *Iterator) Valid() bool {
+	return false
+}
+
+func (itr *Iterator) Key() []byte {
+	return nil
+}

@@ -1,6 +1,7 @@
 package table
 
 import (
+	"crypto/aes"
 	"encoding/binary"
 	"github.com/dgraph-io/ristretto/v2/z"
 	fbs "github.com/google/flatbuffers/go"
@@ -8,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"wiscdb/fb"
 	"wiscdb/options"
 	"wiscdb/pb"
 	"wiscdb/y"
@@ -46,8 +48,9 @@ Structure of Block.
 +-----------------------------------------+--------------------+--------------+------------------+
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
-// 将当前block的信息追加到curBlock
-func (b *Builder) finishBlock() {
+// 将curBlock的信息追加到curBlock
+//如果curBlock 超过了设定的4MB，就会发送给blockChan中
+func (b *Builder) cutDownBlock() {
 
 	if len(b.curBlock.entryOffsets) == 0 {
 		return
@@ -65,12 +68,25 @@ func (b *Builder) finishBlock() {
 	}
 }
 
+// 将key-value添加到block中
+// block会根据当前大小进行判断，决定是否要新增一个block
 func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 	b.addInternal(key, value, valueLen, false)
 }
 
-func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
-	return false
+// 判断curBlock加了key-value后是否超过了设置block的大小4MB，如果超过则改block就完成了
+func (b *Builder) checkBlockSizeGreaterThreshold(key []byte, value y.ValueStruct) bool {
+	if len(b.curBlock.entryOffsets) <= 0 {
+		return false
+	}
+	y.AssertTrue((uint32(len(b.curBlock.entryOffsets))+1)*4+4+8+4 < math.MaxUint32)
+	entriesOffsetsSize := uint32((len(b.curBlock.entryOffsets)+1)*4 + 4 + 8 + 4)
+	estimatedSize := uint32(b.curBlock.end) + 6 + uint32(len(key)) + value.EncodedSize() + entriesOffsetsSize
+	if b.shouldEncrypt() {
+		estimatedSize += aes.BlockSize
+	}
+	y.AssertTrue(uint64(b.curBlock.end)+uint64(estimatedSize) < math.MaxUint32)
+	return estimatedSize > uint32(b.opts.BlockSize)
 }
 
 func (b *Builder) AddStaleKey(key []byte, v y.ValueStruct, valueLen uint32) {
@@ -98,6 +114,8 @@ func (bd *buildData) Copy(dst []byte) int {
 	written += copy(dst[written:], bd.index)
 	written += copy(dst[written:], y.U32ToBytes(uint32(len(bd.index))))
 
+	written += copy(dst[written:], bd.checksum)
+	written += copy(dst[written:], y.U32ToBytes(uint32(len(bd.checksum))))
 	return written
 }
 
@@ -144,12 +162,13 @@ type header struct {
 	diff    uint16
 }
 
+// table中存储的key和value是具体的值而不是地址
 func (b *Builder) addInternal(key []byte, value y.ValueStruct, valueLen uint32, isStale bool) {
-	if b.shouldFinishBlock(key, value) {
+	if b.checkBlockSizeGreaterThreshold(key, value) {
 		if isStale {
 			b.staleDataSize += len(key) + 4 + 4
 		}
-		b.finishBlock()
+		b.cutDownBlock()
 		b.curBlock = &bblock{
 			data: b.alloc.Allocate(b.opts.BlockSize + padding),
 		}
@@ -160,8 +179,8 @@ func (b *Builder) addInternal(key []byte, value y.ValueStruct, valueLen uint32, 
 func (b *Builder) Empty() bool {
 	return len(b.keyHashes) == 0
 }
-func (b *Builder) Done() buildData {
-	b.finishBlock()
+func (b *Builder) CutDoneBuildData() buildData {
+	b.cutDownBlock()
 	if b.blockChan != nil {
 		close(b.blockChan)
 	}
@@ -205,7 +224,32 @@ func (b *Builder) writeBlockOffset(builder *fbs.Builder, bl *bblock, startOffset
 }
 
 func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
-	return nil, 0
+	builder := fbs.NewBuilder(3 << 20) //创建3MB
+	boList, dataSize := b.writeBlockOffsets(builder)
+	fb.TableIndexStartOffsetsVector(builder, len(boList))
+
+	for i := len(boList) - 1; i >= 0; i-- {
+		builder.PrependUOffsetT(boList[i])
+	}
+	boEnd := builder.EndVector(len(boList))
+	var bfoff fbs.UOffsetT
+	if len(bloom) > 0 {
+		bfoff = builder.CreateByteVector(bloom)
+	}
+	fb.TableIndexStart(builder)
+	fb.TableIndexAddOffsets(builder, boEnd)
+	fb.TableIndexAddBloomFilter(builder, bfoff)
+	fb.TableIndexAddMaxVersion(builder, b.maxVersion)
+	fb.TableIndexAddUncompressedSize(builder, b.uncompressedSize.Load())
+	fb.TableIndexAddKeyCount(builder, uint32(len(b.keyHashes)))
+	fb.TableIndexAddOnDiskSize(builder, b.onDiskSize)
+	fb.TableIndexAddStaleDataSize(builder, uint32(b.staleDataSize))
+	builder.Finish(fb.TableIndexEnd(builder))
+
+	buf := builder.FinishedBytes()
+	index := fb.GetRootAsTableIndex(buf, 0)
+	y.AssertTrue(index.MutateOnDiskSize(index.OnDiskSize() + uint32(len(buf))))
+	return buf, dataSize
 }
 
 // 扩容，对bblock data字段进行扩容
@@ -346,7 +390,7 @@ func (b *Builder) ReachedCapacity() bool {
 	return false
 }
 
-// Finish finishes the table by appending the index.
+// CutDownBuilder finishes the table by appending the index.
 /*
 The table structure looks like
 +---------+------------+-----------+---------------+
@@ -358,8 +402,9 @@ The table structure looks like
 +---------+------------+-----------+---------------+
 */
 
-func (b *Builder) Finish() []byte {
-	bd := b.Done()
+// 将bblock中的内存都更新成字节数组
+func (b *Builder) CutDownBuilder() []byte {
+	bd := b.CutDoneBuildData()
 	buf := make([]byte, bd.Size)
 	written := bd.Copy(buf)
 	y.AssertTrue(written == len(buf))
