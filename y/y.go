@@ -8,7 +8,9 @@ import (
 	"hash/crc32"
 	"math"
 	"os"
+	"reflect"
 	"time"
+	"unsafe"
 )
 
 var (
@@ -67,7 +69,26 @@ func CompareKeys(key1, key2 []byte) int {
 	return bytes.Compare(key1[len(key1)-8:], key2[len(key2)-8:])
 }
 
+// 所有key的前8个字节都不是真正的开头
 func ParseKey(key []byte) []byte {
+	if key == nil {
+		return nil
+	}
+	return key[:(len(key) - 8)]
+}
+
+func U32SliceToBytes(u32s []uint32) []byte {
+	if len(u32s) == 0 {
+		return nil
+	}
+	var b []byte
+	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+	hdr.Len = len(u32s) * 4
+	hdr.Cap = hdr.Len
+	hdr.Data = uintptr(unsafe.Pointer(&u32s[0]))
+	return b
+}
+func BytesToU32Slice(b []byte) []uint32 {
 	return nil
 }
 

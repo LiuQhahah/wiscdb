@@ -99,7 +99,9 @@ func (b *Block) verifyCheckSum() error {
 	return nil
 }
 
+// 根据文件名和table builder来创建table
 func CreateTable(fName string, builder *Builder) (*Table, error) {
+	//将tableBuilder转化为buildData
 	bd := builder.Done()
 	mf, err := z.OpenMmapFile(fName, os.O_CREATE|os.O_RDWR|os.O_EXCL, bd.Size)
 	if err == z.NewFile {
@@ -109,6 +111,7 @@ func CreateTable(fName string, builder *Builder) (*Table, error) {
 	} else {
 		return nil, errors.Errorf("file already exists: %s", fName)
 	}
+	//将buildData写到mMapFile中
 	written := bd.Copy(mf.Data)
 	y.AssertTrue(written == len(mf.Data))
 	if err := z.Msync(mf.Data); err != nil {
@@ -206,7 +209,22 @@ func (t *Table) KeySplit(n int, prefix []byte) []string {
 }
 
 func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
-	return &Table{}, nil
+	mf := &z.MmapFile{
+		Data: data,
+		Fd:   nil,
+	}
+	t := &Table{
+		MmapFile:   mf,
+		opt:        opt,
+		tableSize:  len(data),
+		IsInMemory: true,
+		id:         id,
+	}
+	t.ref.Store(1)
+	if err := t.initBiggestAndSmallest(); err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
 func NewFileName(id uint64, dir string) string {
