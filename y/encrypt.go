@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"io"
 )
 
@@ -32,4 +33,10 @@ func XORBlockStream(w io.Writer, src, key, iv []byte) error {
 	sw := cipher.StreamWriter{S: stream, W: w}
 	_, err = io.Copy(sw, bytes.NewReader(src))
 	return Wrapf(err, "XORBlockStream")
+}
+
+func GenerateIV() ([]byte, error) {
+	iv := make([]byte, aes.BlockSize)
+	_, err := rand.Read(iv)
+	return iv, err
 }

@@ -42,7 +42,7 @@ type Options struct {
 	tableCapacity        uint64
 	ChkMode              options.ChecksumVerificationMode
 	BloomFalsePositive   float64
-	BlockSize            int
+	BlockSize            int         // default 4MB
 	DataKey              *pb.DataKey // TODO: DataKey的作用
 	Compression          options.CompressionType
 	BlockCache           *ristretto.Cache[[]byte, *Block]
@@ -99,8 +99,10 @@ func (b *Block) verifyCheckSum() error {
 	return nil
 }
 
+// 根据文件名和table builder来创建table
 func CreateTable(fName string, builder *Builder) (*Table, error) {
-	bd := builder.Done()
+	//将tableBuilder转化为buildData
+	bd := builder.CutDoneBuildData()
 	mf, err := z.OpenMmapFile(fName, os.O_CREATE|os.O_RDWR|os.O_EXCL, bd.Size)
 	if err == z.NewFile {
 
@@ -109,14 +111,17 @@ func CreateTable(fName string, builder *Builder) (*Table, error) {
 	} else {
 		return nil, errors.Errorf("file already exists: %s", fName)
 	}
+	//将buildData写到mMapFile中
 	written := bd.Copy(mf.Data)
 	y.AssertTrue(written == len(mf.Data))
+	//sync到 memtable中
 	if err := z.Msync(mf.Data); err != nil {
 		return nil, y.Wrapf(err, "while calling msync on %s", fName)
 	}
 	return OpenTable(mf, *builder.opts)
 }
 
+// 将memtable写到table中
 func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	if opts.BlockSize == 0 && opts.Compression != options.None {
 		return nil, errors.New("block size cannot be zero")
@@ -156,11 +161,42 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	return t, nil
 }
 
+// TODO: biggest 和smallest的作用
 func (t *Table) initBiggestAndSmallest() error {
+	defer func() {
 
+	}()
+	var err error
+	var ko *fb.BlockOffset
+	if ko, err = t.initIndex(); err != nil {
+		return y.Wrapf(err, "failed to read index")
+	}
+	t.smallest = y.Copy(ko.KeyBytes())
+	it2 := t.NewIterator(REVERSED | NOCACHE)
+	defer it2.Close()
+	it2.Rewind()
+	if !it2.Valid() {
+		return y.Wrapf(it2.err, "failed to initialize biggest for table %s", t.Filename())
+	}
+	t.biggest = y.Copy(it2.Key())
 	return nil
 }
 
+func (t *Table) NewIterator(opt int) *Iterator {
+	t.IncrRef()
+	ti := &Iterator{
+		t:   t,
+		opt: opt,
+	}
+	return ti
+}
+
+func (t *Table) Filename() string {
+	return ""
+}
+func (t *Table) initIndex() (*fb.BlockOffset, error) {
+	return nil, nil
+}
 func (t *Table) VerifyChecksum() error {
 	return nil
 }
@@ -206,7 +242,22 @@ func (t *Table) KeySplit(n int, prefix []byte) []string {
 }
 
 func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
-	return &Table{}, nil
+	mf := &z.MmapFile{
+		Data: data,
+		Fd:   nil,
+	}
+	t := &Table{
+		MmapFile:   mf,
+		opt:        opt,
+		tableSize:  len(data),
+		IsInMemory: true,
+		id:         id,
+	}
+	t.ref.Store(1)
+	if err := t.initBiggestAndSmallest(); err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
 func NewFileName(id uint64, dir string) string {

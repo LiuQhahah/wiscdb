@@ -22,8 +22,10 @@ func newLevelController(db *internal.DB, mf *internal.Manifest) (*LevelsControll
 	return &LevelsController{}, nil
 }
 
+// return file ID
 func (s *LevelsController) ReserveFileID() uint64 {
-	return 0
+	id := s.nextFileID.Add(1)
+	return id - 1
 }
 
 func (s *LevelsController) close() error {

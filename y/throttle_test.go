@@ -114,7 +114,7 @@ func TestThrottle_Finish(t1 *testing.T) {
 				finishErr: tt.fields.finishErr,
 			}
 			if err := t.Finish(); (err != nil) != tt.wantErr {
-				t1.Errorf("Finish() error = %v, wantErr %v", err, tt.wantErr)
+				t1.Errorf("CutDownBuilder() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/dgraph-io/ristretto/v2"
 	"github.com/dgraph-io/ristretto/v2/z"
 	"math"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -49,6 +50,7 @@ type DB struct {
 	indexCache  *ristretto.Cache[uint64, *fb.TableIndex]
 	allocPool   *z.AllocatorPool
 	Manifest    *manifestFile
+	nextMemFid  int
 }
 
 type closer struct {
@@ -65,8 +67,20 @@ func (db *DB) openMemTables(opt Options) error {
 	return nil
 }
 
+// create new memtable
 func (db *DB) newMemTable() (*memTable, error) {
-	return nil, nil
+	mt, err := db.openMemTable(db.nextMemFid, os.O_CREATE|os.O_RDWR)
+	if err == z.NewFile {
+		db.nextMemFid++
+		return mt, nil
+	}
+	if err != nil {
+		db.Opt.Errorf("Got error: %v for id: %d\n", err, db.nextMemFid)
+		return nil, y.Wrapf(err, "newMemTable")
+	}
+
+	errMessage := fmt.Sprintf("File %s already exists", mt.wal.Fd.Name())
+	return mt, errors.New(errMessage)
 }
 
 // create/create memtable with file id.
@@ -350,8 +364,10 @@ func (db *DB) ensureRoomForWrite() error {
 
 	select {
 	//如果db的memTable channel中有值
+	//	如果db的memtable有值，就会执行case里的函数体
 	case db.flushChan <- db.mt:
 		db.Opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n", db.mt.sl.MemSize(), len(db.flushChan))
+		//将memtable写到immutable中
 		db.imm = append(db.imm, db.mt)
 		//将memtable的值写到flushchan中，同事创建新的memtable
 		db.mt, err = db.newMemTable()
@@ -456,6 +472,7 @@ func (db *DB) flushMemTable(lc *z.Closer) {
 			//将memTable的内容写到immutable中
 			y.AssertTrue(mt == db.imm[0])
 			//更新immutable
+			// TODO: immutable最后一个变成了什么？
 			db.imm = db.imm[1:]
 			mt.DecrRef()
 			db.lock.Unlock()
@@ -467,20 +484,22 @@ func (db *DB) flushMemTable(lc *z.Closer) {
 func (db *DB) handleMemTableFlush(mt *memTable, dropPrefixes [][]byte) error {
 	bOpts := buildTableOptions(db)
 	itr := mt.sl.NewUniIterator(false)
+	//将memtable的值写到buildTable中
 	builder := buildL0Table(itr, nil, bOpts)
 	defer builder.Close()
 
 	if builder.Empty() {
-		builder.Finish()
+		builder.CutDownBuilder()
 		return nil
 	}
 	fileID := db.lc.ReserveFileID()
 	var tbl *table.Table
 	var err error
 	if db.Opt.InMemory {
-		data := builder.Finish()
+		data := builder.CutDownBuilder()
 		tbl, err = table.OpenInMemoryTable(data, fileID, &bOpts)
 	} else {
+		//创建table
 		tbl, err = table.CreateTable(table.NewFileName(fileID, db.Opt.Dir), builder)
 	}
 	if err != nil {
@@ -503,9 +522,12 @@ func buildL0Table(iter y.Iterator, dropPrefixes [][]byte, bOpts table.Options) *
 		}
 		vs := iter.Value()
 		var vp valuePointer
+		//判断当前value是存储的是值还是value的地址
 		if vs.Meta&bitValuePointer > 0 {
+			//如果是地址还需要解码
 			vp.Decode(vs.Value)
 		}
+		//从迭代器中得到key value写到table builder中
 		b.Add(iter.Key(), iter.Value(), vp.Len)
 	}
 	return b

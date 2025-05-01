@@ -104,7 +104,7 @@ func (s *Arena) putKey(key []byte) uint32 {
 }
 
 // 根据偏移量返回node struct
-// 根据 便宜量使用unsafe解析处node struct
+// 根据 偏移量使用unsafe在内存中解析出node struct
 func (s *Arena) getNode(offset uint32) *node {
 	if offset == 0 {
 		return nil
@@ -122,6 +122,7 @@ func (s *Arena) getNode(offset uint32) *node {
 }
 
 /*return key */
+//根据偏移量以及key的长度返回字节数组
 func (s *Arena) getKey(offset uint32, size uint16) []byte {
 	return s.buf[offset : offset+uint32(size)]
 }
@@ -165,11 +166,11 @@ func encodeValue(valOffset uint32, valSize uint32) uint64 {
 // decode的return值
 // valOffset:0xABCDEFAB
 // valSize: 0x01234567
+// value存储的是value的偏移量地址以及value大小的值
 func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 	valSize = uint32(value)
 	valOffset = uint32(value >> 32)
 	return
-
 }
 
 /*
@@ -201,6 +202,10 @@ func (s *node) getNextOffset(h int) uint32 {
 	return s.tower[h].Load()
 }
 
+func (s *node) getValueOffset() (uint32, uint32) {
+	value := s.value.Load()
+	return decodeValue(value)
+}
 func (s *node) casNextOffset(h int, old, val uint32) bool {
 	return false
 }
@@ -208,6 +213,8 @@ func (s *node) casNextOffset(h int, old, val uint32) bool {
 // 获取node总分配区的key，返回值是个字节数组
 func (s *node) key(arena *Arena) []byte {
 	//根据key的起始位置以及key的大小返回对应的字节数
+	//s为当前链表的游标位置,每一次插入时都会更新当前的key的偏移量以及key的长度，
+	//从而方便解码出key的值
 	return arena.getKey(s.keyOffset, s.keySize)
 }
 
@@ -229,12 +236,70 @@ func (s *SkipList) getNext(nd *node, height int) *node {
 func (s *SkipList) getHeight() int32 {
 	return s.height.Load()
 }
+
+// 在跳表中查找key
 func (s *SkipList) findNear(key []byte, less bool, allowEqual bool) (*node, bool) {
-	return nil, false
+	//第一层的第一个链表
+	x := s.head
+	//从最高层开始遍历
+	level := int(s.getHeight() - 1)
+	for {
+		//返回的是一个链表.
+		next := s.getNext(x, level)
+		if next == nil { //表明已经遍历到最后一位了
+			if level > 0 {
+				level--
+				continue
+			}
+			if !less {
+				return nil, false
+			}
+			if x == s.head {
+				return nil, false
+			}
+			return x, false
+		}
+
+		//将内存块作为参数传入进入从而获取key
+		nextKey := next.key(s.arena)
+		cmp := y.CompareKeys(key, nextKey)
+		if cmp > 0 {
+			x = next
+			continue
+		}
+		if cmp == 0 {
+			if allowEqual {
+				return next, true
+			}
+			if !less {
+				return s.getNext(next, 0), false
+			}
+			if level > 0 {
+				level--
+				continue
+			}
+			//此时level会等于0,那么就需要重置跳表的头
+			if x == s.head {
+				return nil, false
+			}
+			return x, false
+		}
+		if level > 0 {
+			level--
+			continue
+		}
+		if !less {
+			return next, false
+		}
+		if x == s.head {
+			return nil, false
+		}
+		return x, false
+	}
 }
 
 func (s *SkipList) MemSize() int64 {
-	return 0
+	return s.arena.size()
 }
 
 // 根据key找到这一层插入的位置.
@@ -327,7 +392,7 @@ func (s *SkipList) Put(key []byte, value y.ValueStruct) {
 }
 
 func (s *SkipList) Empty() bool {
-	return false
+	return s.findLast() == nil
 }
 
 // 返回最后一个元素,从跳表中返回node
@@ -344,6 +409,7 @@ func (s *SkipList) findLast() *node {
 		}
 		//当level为0时并且就是跳表中第0层最后一个node
 		if level == 0 {
+			//如果此时的node是跳表头表示没有找到last node，否则改node 就是最后一个node
 			if n == s.head {
 				return nil
 			}
@@ -353,8 +419,20 @@ func (s *SkipList) findLast() *node {
 	}
 }
 
+// 根据key 找到key对应的value struct
 func (s *SkipList) Get(key []byte) y.ValueStruct {
-	return y.ValueStruct{}
+	sNode, _ := s.findNear(key, true, true)
+	if sNode == nil {
+		return y.ValueStruct{}
+	}
+	k := s.arena.getKey(sNode.keyOffset, sNode.keySize)
+	if !y.SameKey(k, key) {
+		return y.ValueStruct{}
+	}
+	valueOffset, valueSize := sNode.getValueOffset()
+	vs := s.arena.getVal(valueOffset, valueSize)
+	vs.Version = y.ParseTs(k)
+	return vs
 }
 
 func (s *SkipList) IncrRef() {
@@ -375,45 +453,51 @@ func (s *SkipList) DecrRef() {
 
 }
 
-// TODO: Iterator的作用
+// 用来遍历跳表, memtable,immutable的合并的操作都需要遍历
 type Iterator struct {
 	list *SkipList
 	n    *node
 }
 
 func (i *Iterator) Close() error {
+	i.list.DecrRef()
 	return nil
 }
 func (i *Iterator) Valid() bool {
-	return false
+	return i.n != nil
 }
 
+// 获取当前游标的key
 func (i *Iterator) Key() []byte {
-	return nil
+	return i.list.arena.getKey(i.n.keyOffset, i.n.keySize)
 }
 
 func (i *Iterator) Value() y.ValueStruct {
-	return y.ValueStruct{}
+	valOffset, valSize := i.n.getValueOffset()
+	return i.list.arena.getVal(valOffset, valSize)
 }
 
-func (i *Iterator) ValueUint64() uint64 {
-	return 0
+// 返回当前迭代器游标的value地址
+func (i *Iterator) LoadValueAddress() uint64 {
+	return i.n.value.Load()
 }
 
 func (i *Iterator) Next() {
-
+	y.AssertTrue(i.Valid())
+	i.n = i.list.getNext(i.n, 0)
 }
 
 func (i *Iterator) Prev() {
-
+	y.AssertTrue(i.Valid())
+	i.n, _ = i.list.findNear(i.Key(), true, false)
 }
 
 func (i *Iterator) Seek(target []byte) {
-
+	i.n, _ = i.list.findNear(target, false, true)
 }
 
 func (i *Iterator) SeekForPrev(target []byte) {
-
+	i.n, _ = i.list.findNear(target, true, true)
 }
 
 func (i *Iterator) SeekToFirst() {
@@ -427,9 +511,12 @@ func (i *Iterator) SeekToLast() {
 func (i *Iterator) NewIterator() *Iterator {
 	return &Iterator{}
 }
-
-func (s *UniIterator) Rewind() {
-
+func (s *UniIterator) ReWind() {
+	if !s.reversed {
+		s.iter.SeekToFirst()
+	} else {
+		s.iter.SeekToLast()
+	}
 }
 
 type UniIterator struct {
@@ -450,28 +537,32 @@ func (s *SkipList) NewIterator() *Iterator {
 	return &Iterator{list: s}
 }
 func (s *UniIterator) Next() {
-
-}
-
-func (s *UniIterator) ReWind() {
-
+	if !s.reversed {
+		s.iter.Next()
+	} else {
+		s.iter.Prev()
+	}
 }
 
 func (s *UniIterator) Seek(key []byte) {
-
+	if !s.reversed {
+		s.iter.Seek(key)
+	} else {
+		s.iter.SeekForPrev(key)
+	}
 }
 func (s *UniIterator) Key() []byte {
-	return nil
+	return s.iter.Key()
 }
 
 func (s *UniIterator) Value() y.ValueStruct {
-	return y.ValueStruct{}
+	return s.iter.Value()
 }
 
 func (s *UniIterator) Valid() bool {
-	return false
+	return s.iter.Valid()
 }
 
 func (s *UniIterator) Close() error {
-	return nil
+	return s.iter.Close()
 }
