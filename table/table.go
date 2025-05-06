@@ -1,10 +1,14 @@
 package table
 
 import (
+	"bytes"
+	"fmt"
 	"github.com/dgraph-io/ristretto/v2"
 	"github.com/dgraph-io/ristretto/v2/z"
 	"github.com/pkg/errors"
+	"google.golang.org/protobuf/proto"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -161,10 +165,57 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	return t, nil
 }
 
+func (t *Table) shouldDecrypt() bool {
+	return false
+}
+
+func (t *Table) readNoFail(off, sz int) []byte {
+	return nil
+}
+
 // TODO: biggest 和smallest的作用
 func (t *Table) initBiggestAndSmallest() error {
 	defer func() {
+		if r := recover(); r != nil {
+			var debugBuf bytes.Buffer
+			defer func() {
+				panic(fmt.Sprintf("%s\n== Recovered ==\n", debugBuf.String()))
+			}()
 
+			count := 0
+			for i := len(t.Data) - 1; i >= 0; i-- {
+				if t.Data[i] != 0 {
+					break
+				}
+				count++
+			}
+
+			fmt.Fprintf(&debugBuf, "\n== Recovering from initIndex crash ==\n")
+			fmt.Fprintf(&debugBuf, "File info: [ID:%d, Size: %d, Zeros:%d]\n", t.id, t.tableSize, count)
+			fmt.Fprintf(&debugBuf, "isEnrypted: %v", t.shouldDecrypt())
+			readPos := t.tableSize
+
+			readPos -= 4
+			buf := t.readNoFail(readPos, 4)
+			checksumLen := int(y.BytesToU32(buf))
+			fmt.Fprintf(&debugBuf, "checksumLen: %d", checksumLen)
+
+			checksum := &pb.CheckSum{}
+			readPos -= checksumLen
+			buf = t.readNoFail(readPos, checksumLen)
+			_ = proto.Unmarshal(buf, checksum)
+			fmt.Fprintf(&debugBuf, "checksum: %+v", checksum)
+
+			readPos -= 4
+			buf = t.readNoFail(readPos, 4)
+			indexLen := int(y.BytesToU32(buf))
+			fmt.Fprintf(&debugBuf, "indexLen: %d ", indexLen)
+
+			readPos -= t.indexLen
+			t.indexStart = readPos
+			indexData := t.readNoFail(readPos, t.indexLen)
+			fmt.Fprintf(&debugBuf, "index: %v ", indexData)
+		}
 	}()
 	var err error
 	var ko *fb.BlockOffset
@@ -209,12 +260,21 @@ func (t *Table) fetchIndex() *fb.TableIndex {
 input file path
 return file ID
 */
-func ParseFileID(filePath string) (uint64, bool) {
-	fileName := strings.TrimSuffix(filePath, ".sst")
-	id, err := strconv.Atoi(fileName)
+
+const fileSuffix = ".sst"
+
+// 对应有sst的文件，返回true及其文件id,否则返回false
+func ParseFileID(name string) (uint64, bool) {
+	name = filepath.Base(name)
+	if !strings.HasSuffix(name, fileSuffix) {
+		return 0, false
+	}
+	name = strings.TrimSuffix(name, fileSuffix)
+	id, err := strconv.Atoi(name)
 	if err != nil {
 		return 0, false
 	}
+	y.AssertTrue(id >= 0)
 	return uint64(id), true
 }
 
@@ -261,11 +321,12 @@ func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
 }
 
 func NewFileName(id uint64, dir string) string {
-	return ""
+	return filepath.Join(dir, IDToFilename(id))
 }
 
+// 根据file ID返回对应的sst文件.
 func IDToFilename(id uint64) string {
-	return ""
+	return fmt.Sprintf("%06d", id) + fileSuffix
 }
 
 func (t *Table) IncrRef() {

@@ -1,6 +1,7 @@
 package level
 
 import (
+	"fmt"
 	"sync"
 	"wiscdb/internal"
 	"wiscdb/table"
@@ -19,7 +20,11 @@ type levelHandler struct {
 }
 
 func newLevelHandler(db *internal.DB, level int) *levelHandler {
-	return &levelHandler{}
+	return &levelHandler{
+		level:    level,
+		strLevel: fmt.Sprintf("l%d", level),
+		db:       db,
+	}
 }
 func (s *levelHandler) isLastLevel() bool {
 	return false
