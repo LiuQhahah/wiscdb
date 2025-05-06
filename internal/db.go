@@ -45,7 +45,7 @@ type DB struct {
 	blockWrites atomic.Int32
 	writeCh     chan *request
 	pub         *publisher
-	register    *KeyRegistry
+	Register    *KeyRegistry
 	blockCache  *ristretto.Cache[[]byte, *table.Block]
 	indexCache  *ristretto.Cache[uint64, *fb.TableIndex]
 	allocPool   *z.AllocatorPool
@@ -482,7 +482,7 @@ func (db *DB) flushMemTable(lc *z.Closer) {
 }
 
 func (db *DB) handleMemTableFlush(mt *memTable, dropPrefixes [][]byte) error {
-	bOpts := buildTableOptions(db)
+	bOpts := BuildTableOptions(db)
 	itr := mt.sl.NewUniIterator(false)
 	//将memtable的值写到buildTable中
 	builder := buildL0Table(itr, nil, bOpts)
@@ -532,7 +532,7 @@ func buildL0Table(iter y.Iterator, dropPrefixes [][]byte, bOpts table.Options) *
 	}
 	return b
 }
-func buildTableOptions(db *DB) table.Options {
+func BuildTableOptions(db *DB) table.Options {
 	opt := db.Opt
 	dk, err := db.registry.LatestDataKey()
 	y.Check(err)

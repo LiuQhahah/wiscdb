@@ -86,6 +86,16 @@ func storeDataKey(buf *bytes.Buffer, storageKey []byte, k *pb.DataKey) error {
 	return nil
 }
 
+// 基于id获取datakey的值.
 func (kr *KeyRegistry) DataKey(id uint64) (*pb.DataKey, error) {
-	return nil, nil
+	kr.RLock()
+	defer kr.RUnlock()
+	if id == 0 {
+		return nil, nil
+	}
+	dk, ok := kr.dataKeys[id]
+	if !ok {
+		return nil, y.Wrapf(ErrInvalidKey, "Error for the KEY ID %d", id)
+	}
+	return dk, nil
 }

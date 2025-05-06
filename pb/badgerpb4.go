@@ -2,6 +2,7 @@ package pb
 
 import (
 	"github.com/dgraph-io/ristretto/v2/z"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"wiscdb/options"
 )
 
@@ -74,6 +75,31 @@ const (
 
 type CheckSum struct {
 	Algo ChecksumAlgorithm
+}
+
+func (x *CheckSum) Reset() {
+
+}
+
+func (x *CheckSum) String() string {
+	return ""
+}
+
+func (*CheckSum) ProtoMessage() {
+
+}
+func (x *CheckSum) ProtoReflect() protoreflect.Message {
+	return nil
+}
+func (*CheckSum) Descriptor() ([]byte, []int) {
+	return nil, nil
+}
+
+func (x *CheckSum) GetAlgo() ChecksumAlgorithm {
+	return 0
+}
+func (x *CheckSum) GetSum() uint64 {
+	return 0
 }
 
 type Match struct {

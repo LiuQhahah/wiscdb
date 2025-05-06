@@ -23,6 +23,6 @@ func openDir(path string) (*os.File, error) {
 	return nil, nil
 }
 
-func syncDir(dir string) error {
+func SyncDir(dir string) error {
 	return nil
 }

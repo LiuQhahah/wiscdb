@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"os"
 	"time"
 	"wiscdb/options"
 )
@@ -116,4 +117,15 @@ func (opt *Options) Infof(format string, v ...interface{}) {
 		return
 	}
 	opt.Logger.Infof(format, v...)
+}
+
+// 根据option返回文件的flag,如果是readonly则返回readonly，否则返回write
+func (opt Options) GetFileFlags() int {
+	var flags int
+	if opt.ReadOnly {
+		flags |= os.O_RDONLY
+	} else {
+		flags |= os.O_RDWR
+	}
+	return flags
 }
