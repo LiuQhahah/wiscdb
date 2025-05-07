@@ -30,8 +30,11 @@ func (s *levelHandler) isLastLevel() bool {
 	return false
 }
 
+// 使用读锁获取当前DB的大小
 func (s *levelHandler) getTotalSize() int64 {
-	return 0
+	s.RLock()
+	defer s.RUnlock()
+	return s.totalSize
 }
 
 func (s *levelHandler) initTables(tables []*table.Table) {

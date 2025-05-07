@@ -99,6 +99,12 @@ func DefaultOptions(path string) Options {
 	}
 }
 
+func (opt *Options) Warningf(format string, v ...interface{}) {
+	if opt.Logger == nil {
+		return
+	}
+	opt.Logger.Warningf(format, v...)
+}
 func (opt *Options) Debugf(format string, v ...interface{}) {
 	if opt.Logger == nil {
 		return
