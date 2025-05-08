@@ -47,7 +47,7 @@ type Options struct {
 	ChkMode              options.ChecksumVerificationMode
 	BloomFalsePositive   float64
 	BlockSize            int         // default 4MB
-	DataKey              *pb.DataKey // TODO: DataKey的作用
+	DataKey              *pb.DataKey // DataKey的作用: 判断table是否有加密
 	Compression          options.CompressionType
 	BlockCache           *ristretto.Cache[[]byte, *Block]
 	IndexCache           *ristretto.Cache[uint64, *fb.TableIndex]
@@ -59,7 +59,7 @@ type Options struct {
 type cheapIndex struct {
 	MaxVersion        uint64
 	KeyCount          uint32
-	UnCompressionSize uint32
+	UncompressedSize  uint32
 	OnDiskSize        uint32
 	BloomFilterLength int
 	OffsetsLength     int
@@ -165,12 +165,21 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	return t, nil
 }
 
+// 根据判断table的选项有没有datakey来判断是否需要解密
 func (t *Table) shouldDecrypt() bool {
-	return false
+	return t.opt.DataKey != nil
 }
 
+// 从table中读取字节数组,读取的逻辑是按照偏移量+文件尺寸
+func (t *Table) read(off, sz int) ([]byte, error) {
+	return t.Bytes(off, sz)
+}
+
+// 按照偏移量+文件尺寸读取字节数组
 func (t *Table) readNoFail(off, sz int) []byte {
-	return nil
+	res, err := t.read(off, sz)
+	y.Check(err)
+	return res
 }
 
 //	biggest 和smallest的作用
@@ -178,7 +187,9 @@ func (t *Table) readNoFail(off, sz int) []byte {
 // biggest和smallest作为一张SST表的属性方便用于query.
 func (t *Table) initBiggestAndSmallest() error {
 	defer func() {
+		//r 指的是发生了panic返回的内容,比如panic("error") 那么string error就是r
 		if r := recover(); r != nil {
+			//r!=nil 则表明有panic发生 输出索引信息
 			var debugBuf bytes.Buffer
 			defer func() {
 				panic(fmt.Sprintf("%s\n== Recovered ==\n", debugBuf.String()))
@@ -198,39 +209,49 @@ func (t *Table) initBiggestAndSmallest() error {
 			readPos := t.tableSize
 
 			readPos -= 4
+			//读取四个字节,拿到校验合的长度
 			buf := t.readNoFail(readPos, 4)
 			checksumLen := int(y.BytesToU32(buf))
 			fmt.Fprintf(&debugBuf, "checksumLen: %d", checksumLen)
 
 			checksum := &pb.CheckSum{}
 			readPos -= checksumLen
+			//读取校验和并解析校验和
 			buf = t.readNoFail(readPos, checksumLen)
 			_ = proto.Unmarshal(buf, checksum)
 			fmt.Fprintf(&debugBuf, "checksum: %+v", checksum)
 
 			readPos -= 4
+			//读取索引,用4个字节表示索引
 			buf = t.readNoFail(readPos, 4)
 			indexLen := int(y.BytesToU32(buf))
 			fmt.Fprintf(&debugBuf, "indexLen: %d ", indexLen)
 
 			readPos -= t.indexLen
 			t.indexStart = readPos
+			//读取索引值
 			indexData := t.readNoFail(readPos, t.indexLen)
 			fmt.Fprintf(&debugBuf, "index: %v ", indexData)
 		}
 	}()
 	var err error
 	var ko *fb.BlockOffset
+	// 初始化索引
 	if ko, err = t.initIndex(); err != nil {
 		return y.Wrapf(err, "failed to read index")
 	}
+	//将keyBytes的内容复制到smallest中
+	//找到索引中的key
 	t.smallest = y.Copy(ko.KeyBytes())
+	//为table创建迭代器是为着找到最大的值
 	it2 := t.NewIterator(REVERSED | NOCACHE)
 	defer it2.Close()
+	//读取table中的值
 	it2.Rewind()
 	if !it2.Valid() {
 		return y.Wrapf(it2.err, "failed to initialize biggest for table %s", t.Filename())
 	}
+	//将迭代器的Key写到biggest中
 	t.biggest = y.Copy(it2.Key())
 	return nil
 }
@@ -247,9 +268,76 @@ func (t *Table) NewIterator(opt int) *Iterator {
 func (t *Table) Filename() string {
 	return ""
 }
+
+// TODO: 如何构造table 的索引 key是key value时存储的位置吗？
 func (t *Table) initIndex() (*fb.BlockOffset, error) {
+	//从后向前读取
+	readPos := t.tableSize
+	readPos -= 4
+	buf := t.readNoFail(readPos, 4)
+	//校验和长度的长度占据4个字节因此读到buf中并解析出校验和的长度
+	checksumLen := int(y.BytesToU32(buf))
+	if checksumLen < 0 {
+		return nil, errors.New("checksum  length less than zero. Data corrupted")
+	}
+	readPos -= checksumLen
+	buf = t.readNoFail(readPos, checksumLen)
+	expectedChk := &pb.CheckSum{}
+	//将校验和写到expectedChk struct中
+	if err := proto.Unmarshal(buf, expectedChk); err != nil {
+		return nil, err
+	}
+
+	readPos -= 4
+	buf = t.readNoFail(readPos, 4)
+	t.indexLen = int(y.BytesToU32(buf))
+
+	readPos -= t.indexLen
+	t.indexStart = readPos
+	data := t.readNoFail(readPos, t.indexLen)
+
+	if err := y.VerifyCheckSum(data, expectedChk); err != nil {
+		return nil, y.Wrapf(err, "failed to verify checksum for this table: %s", t.Filename())
+	}
+
+	index, err := t.readTableIndex()
+	if err != nil {
+		return nil, err
+	}
+	if !t.shouldDecrypt() {
+		t._index = index
+	}
+	t._cheap = &cheapIndex{
+		MaxVersion:        index.MaxVersion(),
+		KeyCount:          index.KeyCount(),
+		UncompressedSize:  index.UncompressedSize(),
+		OnDiskSize:        index.OnDiskSize(),
+		OffsetsLength:     index.OffsetsLength(),
+		BloomFilterLength: index.BloomFilterLength(),
+	}
+	t.hasBloomFilter = len(index.BloomFilterBytes()) > 0
+	var bo fb.BlockOffset
+	y.AssertTrue(index.Offsets(&bo, 0))
+	return &bo, nil
+}
+
+// 读取table的索引
+func (t *Table) readTableIndex() (*fb.TableIndex, error) {
+	//在table中读取索引
+	data := t.readNoFail(t.indexStart, t.indexLen)
+	var err error
+	if t.shouldDecrypt() {
+		if data, err = t.decrypt(data, false); err != nil {
+			return nil, y.Wrapf(err, "Error while decrpting table index for the table %d in readTableIndex", t.id)
+		}
+	}
+	return fb.GetRootAsTableIndex(data, 0), nil
+}
+
+func (t *Table) decrypt(data []byte, viaCalloc bool) ([]byte, error) {
 	return nil, nil
 }
+
 func (t *Table) VerifyChecksum() error {
 	return nil
 }

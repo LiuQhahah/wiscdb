@@ -47,13 +47,18 @@ func (itr *blockIterator) seekToFirst() {
 func (itr *blockIterator) seekToLast() {
 
 }
+func (itr *blockIterator) Close() {
+	itr.block.decrRef()
+}
 func (itr *Iterator) Close() error {
-	return nil
+	itr.bi.Close()
+	return itr.t.DecrRef()
 }
 func (itr *Iterator) Valid() bool {
-	return false
+	return itr.err == nil
 }
 
+// 拿到block iterator中的key作为该table中最大的key
 func (itr *Iterator) Key() []byte {
-	return nil
+	return itr.bi.key
 }

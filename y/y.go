@@ -45,7 +45,9 @@ func SafeCopy(a, src []byte) []byte {
 }
 
 func Copy(a []byte) []byte {
-	return nil
+	b := make([]byte, len(a))
+	copy(b, a)
+	return b
 }
 
 func KeyWithTs(key []byte, ts uint64) []byte {

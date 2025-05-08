@@ -35,6 +35,9 @@ func XORBlockStream(w io.Writer, src, key, iv []byte) error {
 	return Wrapf(err, "XORBlockStream")
 }
 
+// 随机生成16个字节
+// 使用硬件随机生成token等,安全
+// https://medium.com/@smafjal/understanding-crypto-rand-in-go-hardware-to-software-51798d3ebcbd
 func GenerateIV() ([]byte, error) {
 	iv := make([]byte, aes.BlockSize)
 	_, err := rand.Read(iv)
