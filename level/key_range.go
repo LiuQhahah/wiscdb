@@ -36,7 +36,7 @@ func (r keyRange) overlapsWith(dst keyRange) bool {
 }
 
 // 返回多张表的key返回，主要是最大值与最小值
-func getKeyRange(tables []*table.Table) keyRange {
+func getKeyRange(tables ...*table.Table) keyRange {
 	if len(tables) == 0 {
 		return keyRange{}
 	}
