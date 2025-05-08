@@ -75,6 +75,7 @@ const (
 
 type CheckSum struct {
 	Algo ChecksumAlgorithm
+	Sum  uint64
 }
 
 func (x *CheckSum) Reset() {

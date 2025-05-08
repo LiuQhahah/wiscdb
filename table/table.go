@@ -14,7 +14,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 	"wiscdb/fb"
 	"wiscdb/options"
 	"wiscdb/pb"
@@ -63,44 +62,6 @@ type cheapIndex struct {
 	OnDiskSize        uint32
 	BloomFilterLength int
 	OffsetsLength     int
-}
-
-type Block struct {
-	offset            int
-	data              []byte
-	checksum          []byte
-	entriesIndexStart int
-	entryOffsets      []uint32
-	chkLen            int
-	freeMe            bool
-	ref               atomic.Int32
-}
-
-var NumBlocks atomic.Int32
-
-func (b *Block) incrRef() bool {
-	ref := b.ref.Load()
-	return b.ref.CompareAndSwap(ref, ref+1)
-}
-
-func (b *Block) decrRef() {
-	ref := b.ref.Load()
-	if ref == 0 {
-		return
-	}
-
-	b.ref.CompareAndSwap(ref, ref-1)
-}
-
-const intSize = int(unsafe.Sizeof(int(0)))
-
-func (b *Block) size() int64 {
-	return int64(3*intSize + cap(b.data) + cap(b.entryOffsets)*4 + cap(b.checksum))
-}
-
-func (b *Block) verifyCheckSum() error {
-
-	return nil
 }
 
 // 根据文件名和table builder来创建table
@@ -369,11 +330,91 @@ func ParseFileID(name string) (uint64, bool) {
 }
 
 func (t *Table) offsets(ko *fb.BlockOffset, i int) bool {
-	return false
+	return t.fetchIndex().Offsets(ko, i)
 }
 
 func (t *Table) block(idx int, useCache bool) (*Block, error) {
-	return nil, nil
+	y.AssertTruef(idx >= 0, "idx=%d", idx)
+	//idx的值不能超过block的长度
+	if idx >= t.offsetsLength() {
+		return nil, errors.New("block out of index")
+	}
+	//如果将block存储在cache中来
+	if t.opt.BlockCache != nil {
+		key := t.blockCacheKey(idx)
+		//根据key拿到缓存中的block
+		blk, ok := t.opt.BlockCache.Get(key)
+		//如果不为空则直接返回blk
+		if ok && blk != nil {
+			if blk.incrRef() {
+				return blk, nil
+			}
+		}
+	}
+	var ko fb.BlockOffset
+	y.AssertTrue(t.offsets(&ko, idx))
+	//blockOffset更新到block中
+	blk := &Block{offset: int(ko.Offset())}
+	//设置引用加1
+	blk.ref.Store(1)
+	defer blk.decrRef()
+	NumBlocks.Add(1)
+
+	var err error
+	//在table中读取block的data
+	if blk.data, err = t.read(blk.offset, int(ko.Len())); err != nil {
+		return nil, y.Wrapf(err, "failed to read from file: %s at offset: %d, len: %d", t.Fd.Name(), blk.offset, ko.Len())
+	}
+	if t.shouldDecrypt() {
+		if blk.data, err = t.decrypt(blk.data, true); err != nil {
+			return nil, err
+		}
+		blk.freeMe = true
+	}
+
+	if err = t.decompress(blk); err != nil {
+		return nil, y.Wrapf(err, "failed to decode compressed data in file: %s at offset: %d,len: %d", t.Fd.Name(), blk.offset, ko.Len())
+	}
+
+	readPos := len(blk.data) - 4
+	//取后四个字节的到校验和的长度
+	blk.chkLen = int(y.BytesToU32(blk.data[readPos : readPos+4]))
+	if blk.chkLen > len(blk.data) {
+		return nil, errors.New("invalid checksum length,Either the data is corrupted or the table options are incorrectly set")
+	}
+
+	readPos -= blk.chkLen
+	//读取校验和
+	blk.checksum = blk.data[readPos : readPos+blk.chkLen]
+	readPos -= 4
+	//读取entry的数量即key-value个数
+	numEntries := int(y.BytesToU32(blk.data[readPos : readPos+4]))
+	entriesIndexStart := readPos - (numEntries * 4)
+	entriesIndexEnd := entriesIndexStart + numEntries*4
+
+	//读取entry的偏移量
+	blk.entryOffsets = y.BytesToU32Slice(blk.data[entriesIndexStart:entriesIndexEnd])
+	//读取entry 开始时的索引
+	blk.entriesIndexStart = entriesIndexStart
+
+	//读取data值
+	blk.data = blk.data[:readPos+4]
+
+	if t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead {
+		if err = blk.verifyCheckSum(); err != nil {
+			return nil, err
+		}
+	}
+	blk.incrRef()
+	//如果需要使用cache,则将block写到cache中
+	if useCache && t.opt.BlockCache != nil {
+		key := t.blockCacheKey(idx)
+		y.AssertTrue(blk.incrRef())
+		if !t.opt.BlockCache.Set(key, blk, blk.size()) {
+			blk.decrRef()
+		}
+	}
+	return blk, nil
 }
 
 func (t *Table) decompress(b *Block) error {
