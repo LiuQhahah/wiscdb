@@ -20,6 +20,6 @@ func (cs *compactStatus) delete(cd compactDef) {
 
 }
 
-func (cs *compactStatus) compareAndAdd(cd compactDef) bool {
+func (cs *compactStatus) compareAndAdd(_ thisAndNextLevelRLocked, cd compactDef) bool {
 	return false
 }

@@ -26,12 +26,17 @@ func newLevelHandler(db *internal.DB, level int) *levelHandler {
 		db:       db,
 	}
 }
+
+// 判断当前的level是不是最高层的level
 func (s *levelHandler) isLastLevel() bool {
-	return false
+	return s.level == s.db.Opt.MaxLevels-1
 }
 
+// 使用读锁获取当前DB的大小
 func (s *levelHandler) getTotalSize() int64 {
-	return 0
+	s.RLock()
+	defer s.RUnlock()
+	return s.totalSize
 }
 
 func (s *levelHandler) initTables(tables []*table.Table) {
@@ -88,7 +93,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 	return y.ValueStruct{}, nil
 }
 
-func (s *levelHandler) overlappingTables(kr keyRange) (int, int) {
+func (s *levelHandler) overlappingTables(_ levelHandlerRLocked, kr keyRange) (int, int) {
 	return 0, 0
 }
 
