@@ -1,9 +1,11 @@
 package level
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/dgraph-io/ristretto/v2/z"
+	otrace "go.opencensus.io/trace"
 	"math/rand"
 	"os"
 	"sort"
@@ -315,7 +317,54 @@ func (s *LevelsController) lastLevel() *levelHandler {
 	return s.levels[len(s.levels)-1]
 }
 
+// 按照协程ID以及压缩优先级进行压缩
 func (s *LevelsController) doCompact(id int, p compactionPriority) error {
+	l := p.level
+	y.AssertTrue(l < s.kv.Opt.MaxLevels)
+	//如果是L0
+	//我理解的baseLevel指的是当前DB的最高层是L0即所有数据还存在
+	//memtable中，第一次准备写到磁盘中
+	//则定义每一层的约定
+	if p.t.baseLevel == 0 {
+		p.t = s.levelTargets()
+	}
+
+	//创建span用来记录trace
+	_, span := otrace.StartSpan(context.Background(), "WISC.Compaction")
+	//添加defer 函数用来关闭span
+	defer span.End()
+	cd := compactDef{
+		compactorId:  id,
+		span:         span,
+		p:            p,
+		t:            p.t,
+		thisLevel:    s.levels[l],
+		dropPrefixes: p.dropPrefixes,
+	}
+
+	//如果是L0 表示使用memtableflush到disk中
+	if l == 0 {
+		cd.nextLevel = s.levels[p.t.baseLevel]
+		if !s.fillTablesL0(&cd) {
+			return errFillTables
+		}
+	} else {
+		cd.nextLevel = cd.thisLevel
+		if !cd.thisLevel.isLastLevel() {
+			cd.nextLevel = s.levels[l+1]
+		}
+		if !s.fillTables(&cd) {
+			return errFillTables
+		}
+	}
+	defer s.compactStatus.delete(cd)
+	span.Annotatef(nil, "Compaction: %+v", cd)
+
+	if err := s.runCompactDef(id, l, cd); err != nil {
+		s.kv.Opt.Warningf("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)
+		return err
+	}
+	s.kv.Opt.Debugf("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
 	return nil
 }
 
@@ -368,16 +417,63 @@ func (s *LevelsController) sortByStaleDataSize(tables []*table.Table, cd *compac
 
 }
 
+// 压缩L0层的数据
 func (s *LevelsController) fillTablesL0(cd *compactDef) bool {
-	return false
+	if ok := s.fillTablesL0ToLBase(cd); ok {
+		return true
+	}
+	return s.fillTablesL0ToL0(cd)
 }
 func (s *LevelsController) fillTablesL0ToL0(cd *compactDef) bool {
 	return false
 }
 
 func (s *LevelsController) fillTablesL0ToLBase(cd *compactDef) bool {
-	return false
+	if cd.nextLevel.level == 0 {
+		panic("Base level can't be zero.")
+	}
+	if cd.p.adjusted > 0.0 && cd.p.adjusted < 1.0 {
+		return false
+	}
+
+	cd.lockLevels()
+	defer cd.unlockLevels()
+	// top为当前level的所有table
+	top := cd.thisLevel.tables
+	if len(top) == 0 {
+		return false
+	}
+	var out []*table.Table
+	if len(cd.dropPrefixes) > 0 {
+		out = top
+	} else {
+		var kr keyRange
+		for _, t := range top {
+			dkr := getKeyRange(t)
+			if kr.overlapsWith(dkr) {
+				out = append(out, t)
+				kr.extend(dkr)
+			} else {
+				break
+			}
+		}
+	}
+	cd.thisRange = getKeyRange(out...)
+	cd.top = out
+
+	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, cd.thisRange)
+	cd.bot = make([]*table.Table, right-left)
+	copy(cd.bot, cd.nextLevel.tables[left:right])
+
+	if len(cd.bot) == 0 {
+		cd.nextRange = cd.thisRange
+	} else {
+		cd.nextRange = getKeyRange(cd.bot...)
+	}
+	return s.compactStatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd)
 }
+
+type thisAndNextLevelRLocked struct{}
 
 func (s *LevelsController) appendIterator(iters []y.Iterator, opt *internal.IteratorOptions) []y.Iterator {
 	return nil

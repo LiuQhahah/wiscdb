@@ -173,7 +173,9 @@ func (t *Table) readNoFail(off, sz int) []byte {
 	return nil
 }
 
-// TODO: biggest 和smallest的作用
+//	biggest 和smallest的作用
+//
+// biggest和smallest作为一张SST表的属性方便用于query.
 func (t *Table) initBiggestAndSmallest() error {
 	defer func() {
 		if r := recover(); r != nil {
@@ -372,4 +374,11 @@ func (t *Table) KeyID() uint64 {
 }
 func (t *Table) CompressionType() options.CompressionType {
 	return t.opt.Compression
+}
+
+func (t *Table) Smallest() []byte {
+	return t.smallest
+}
+func (t *Table) Biggest() []byte {
+	return t.biggest
 }
