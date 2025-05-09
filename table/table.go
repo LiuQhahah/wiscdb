@@ -261,6 +261,7 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 		return nil, y.Wrapf(err, "failed to verify checksum for this table: %s", t.Filename())
 	}
 
+	//初始化索引，直接读取table的索引
 	index, err := t.readTableIndex()
 	if err != nil {
 		return nil, err
@@ -268,6 +269,7 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 	if !t.shouldDecrypt() {
 		t._index = index
 	}
+	//构建table的_cheap 包含key的数量,布隆过滤器的长度
 	t._cheap = &cheapIndex{
 		MaxVersion:        index.MaxVersion(),
 		KeyCount:          index.KeyCount(),
@@ -278,6 +280,7 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 	}
 	t.hasBloomFilter = len(index.BloomFilterBytes()) > 0
 	var bo fb.BlockOffset
+	//将索引0返回即最小的Key
 	y.AssertTrue(index.Offsets(&bo, 0))
 	return &bo, nil
 }
