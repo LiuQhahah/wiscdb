@@ -51,6 +51,7 @@ func (kr *KeyRegistry) LatestDataKey() (*pb.DataKey, error) {
 		return key, nil
 	}
 	k := make([]byte, len(kr.opt.EncryptionKey))
+	//产生类似于token的信息
 	iv, err := y.GenerateIV()
 	if err != nil {
 		return nil, err

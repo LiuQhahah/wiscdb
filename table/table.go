@@ -14,7 +14,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 	"wiscdb/fb"
 	"wiscdb/options"
 	"wiscdb/pb"
@@ -47,7 +46,7 @@ type Options struct {
 	ChkMode              options.ChecksumVerificationMode
 	BloomFalsePositive   float64
 	BlockSize            int         // default 4MB
-	DataKey              *pb.DataKey // TODO: DataKey的作用
+	DataKey              *pb.DataKey // DataKey的作用: 判断table是否有加密
 	Compression          options.CompressionType
 	BlockCache           *ristretto.Cache[[]byte, *Block]
 	IndexCache           *ristretto.Cache[uint64, *fb.TableIndex]
@@ -59,48 +58,10 @@ type Options struct {
 type cheapIndex struct {
 	MaxVersion        uint64
 	KeyCount          uint32
-	UnCompressionSize uint32
+	UncompressedSize  uint32
 	OnDiskSize        uint32
 	BloomFilterLength int
 	OffsetsLength     int
-}
-
-type Block struct {
-	offset            int
-	data              []byte
-	checksum          []byte
-	entriesIndexStart int
-	entryOffsets      []uint32
-	chkLen            int
-	freeMe            bool
-	ref               atomic.Int32
-}
-
-var NumBlocks atomic.Int32
-
-func (b *Block) incrRef() bool {
-	ref := b.ref.Load()
-	return b.ref.CompareAndSwap(ref, ref+1)
-}
-
-func (b *Block) decrRef() {
-	ref := b.ref.Load()
-	if ref == 0 {
-		return
-	}
-
-	b.ref.CompareAndSwap(ref, ref-1)
-}
-
-const intSize = int(unsafe.Sizeof(int(0)))
-
-func (b *Block) size() int64 {
-	return int64(3*intSize + cap(b.data) + cap(b.entryOffsets)*4 + cap(b.checksum))
-}
-
-func (b *Block) verifyCheckSum() error {
-
-	return nil
 }
 
 // 根据文件名和table builder来创建table
@@ -165,12 +126,21 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	return t, nil
 }
 
+// 根据判断table的选项有没有datakey来判断是否需要解密
 func (t *Table) shouldDecrypt() bool {
-	return false
+	return t.opt.DataKey != nil
 }
 
+// 从table中读取字节数组,读取的逻辑是按照偏移量+文件尺寸
+func (t *Table) read(off, sz int) ([]byte, error) {
+	return t.Bytes(off, sz)
+}
+
+// 按照偏移量+文件尺寸读取字节数组
 func (t *Table) readNoFail(off, sz int) []byte {
-	return nil
+	res, err := t.read(off, sz)
+	y.Check(err)
+	return res
 }
 
 //	biggest 和smallest的作用
@@ -178,7 +148,9 @@ func (t *Table) readNoFail(off, sz int) []byte {
 // biggest和smallest作为一张SST表的属性方便用于query.
 func (t *Table) initBiggestAndSmallest() error {
 	defer func() {
+		//r 指的是发生了panic返回的内容,比如panic("error") 那么string error就是r
 		if r := recover(); r != nil {
+			//r!=nil 则表明有panic发生 输出索引信息
 			var debugBuf bytes.Buffer
 			defer func() {
 				panic(fmt.Sprintf("%s\n== Recovered ==\n", debugBuf.String()))
@@ -198,39 +170,49 @@ func (t *Table) initBiggestAndSmallest() error {
 			readPos := t.tableSize
 
 			readPos -= 4
+			//读取四个字节,拿到校验合的长度
 			buf := t.readNoFail(readPos, 4)
 			checksumLen := int(y.BytesToU32(buf))
 			fmt.Fprintf(&debugBuf, "checksumLen: %d", checksumLen)
 
 			checksum := &pb.CheckSum{}
 			readPos -= checksumLen
+			//读取校验和并解析校验和
 			buf = t.readNoFail(readPos, checksumLen)
 			_ = proto.Unmarshal(buf, checksum)
 			fmt.Fprintf(&debugBuf, "checksum: %+v", checksum)
 
 			readPos -= 4
+			//读取索引,用4个字节表示索引
 			buf = t.readNoFail(readPos, 4)
 			indexLen := int(y.BytesToU32(buf))
 			fmt.Fprintf(&debugBuf, "indexLen: %d ", indexLen)
 
 			readPos -= t.indexLen
 			t.indexStart = readPos
+			//读取索引值
 			indexData := t.readNoFail(readPos, t.indexLen)
 			fmt.Fprintf(&debugBuf, "index: %v ", indexData)
 		}
 	}()
 	var err error
 	var ko *fb.BlockOffset
+	// 初始化索引
 	if ko, err = t.initIndex(); err != nil {
 		return y.Wrapf(err, "failed to read index")
 	}
+	//将keyBytes的内容复制到smallest中
+	//找到索引中的key
 	t.smallest = y.Copy(ko.KeyBytes())
+	//为table创建迭代器是为着找到最大的值
 	it2 := t.NewIterator(REVERSED | NOCACHE)
 	defer it2.Close()
+	//读取table中的值
 	it2.Rewind()
 	if !it2.Valid() {
 		return y.Wrapf(it2.err, "failed to initialize biggest for table %s", t.Filename())
 	}
+	//将迭代器的Key写到biggest中
 	t.biggest = y.Copy(it2.Key())
 	return nil
 }
@@ -247,9 +229,79 @@ func (t *Table) NewIterator(opt int) *Iterator {
 func (t *Table) Filename() string {
 	return ""
 }
+
+// TODO: 如何构造table 的索引 key是key value时存储的位置吗？
 func (t *Table) initIndex() (*fb.BlockOffset, error) {
+	//从后向前读取
+	readPos := t.tableSize
+	readPos -= 4
+	buf := t.readNoFail(readPos, 4)
+	//校验和长度的长度占据4个字节因此读到buf中并解析出校验和的长度
+	checksumLen := int(y.BytesToU32(buf))
+	if checksumLen < 0 {
+		return nil, errors.New("checksum  length less than zero. Data corrupted")
+	}
+	readPos -= checksumLen
+	buf = t.readNoFail(readPos, checksumLen)
+	expectedChk := &pb.CheckSum{}
+	//将校验和写到expectedChk struct中
+	if err := proto.Unmarshal(buf, expectedChk); err != nil {
+		return nil, err
+	}
+
+	readPos -= 4
+	buf = t.readNoFail(readPos, 4)
+	t.indexLen = int(y.BytesToU32(buf))
+
+	readPos -= t.indexLen
+	t.indexStart = readPos
+	data := t.readNoFail(readPos, t.indexLen)
+
+	if err := y.VerifyCheckSum(data, expectedChk); err != nil {
+		return nil, y.Wrapf(err, "failed to verify checksum for this table: %s", t.Filename())
+	}
+
+	//初始化索引，直接读取table的索引
+	index, err := t.readTableIndex()
+	if err != nil {
+		return nil, err
+	}
+	if !t.shouldDecrypt() {
+		t._index = index
+	}
+	//构建table的_cheap 包含key的数量,布隆过滤器的长度
+	t._cheap = &cheapIndex{
+		MaxVersion:        index.MaxVersion(),
+		KeyCount:          index.KeyCount(),
+		UncompressedSize:  index.UncompressedSize(),
+		OnDiskSize:        index.OnDiskSize(),
+		OffsetsLength:     index.OffsetsLength(),
+		BloomFilterLength: index.BloomFilterLength(),
+	}
+	t.hasBloomFilter = len(index.BloomFilterBytes()) > 0
+	var bo fb.BlockOffset
+	//将索引0返回即最小的Key
+	y.AssertTrue(index.Offsets(&bo, 0))
+	return &bo, nil
+}
+
+// 读取table的索引
+func (t *Table) readTableIndex() (*fb.TableIndex, error) {
+	//在table中读取索引
+	data := t.readNoFail(t.indexStart, t.indexLen)
+	var err error
+	if t.shouldDecrypt() {
+		if data, err = t.decrypt(data, false); err != nil {
+			return nil, y.Wrapf(err, "Error while decrpting table index for the table %d in readTableIndex", t.id)
+		}
+	}
+	return fb.GetRootAsTableIndex(data, 0), nil
+}
+
+func (t *Table) decrypt(data []byte, viaCalloc bool) ([]byte, error) {
 	return nil, nil
 }
+
 func (t *Table) VerifyChecksum() error {
 	return nil
 }
@@ -281,11 +333,91 @@ func ParseFileID(name string) (uint64, bool) {
 }
 
 func (t *Table) offsets(ko *fb.BlockOffset, i int) bool {
-	return false
+	return t.fetchIndex().Offsets(ko, i)
 }
 
 func (t *Table) block(idx int, useCache bool) (*Block, error) {
-	return nil, nil
+	y.AssertTruef(idx >= 0, "idx=%d", idx)
+	//idx的值不能超过block的长度
+	if idx >= t.offsetsLength() {
+		return nil, errors.New("block out of index")
+	}
+	//如果将block存储在cache中来
+	if t.opt.BlockCache != nil {
+		key := t.blockCacheKey(idx)
+		//根据key拿到缓存中的block
+		blk, ok := t.opt.BlockCache.Get(key)
+		//如果不为空则直接返回blk
+		if ok && blk != nil {
+			if blk.incrRef() {
+				return blk, nil
+			}
+		}
+	}
+	var ko fb.BlockOffset
+	y.AssertTrue(t.offsets(&ko, idx))
+	//blockOffset更新到block中
+	blk := &Block{offset: int(ko.Offset())}
+	//设置引用加1
+	blk.ref.Store(1)
+	defer blk.decrRef()
+	NumBlocks.Add(1)
+
+	var err error
+	//在table中读取block的data
+	if blk.data, err = t.read(blk.offset, int(ko.Len())); err != nil {
+		return nil, y.Wrapf(err, "failed to read from file: %s at offset: %d, len: %d", t.Fd.Name(), blk.offset, ko.Len())
+	}
+	if t.shouldDecrypt() {
+		if blk.data, err = t.decrypt(blk.data, true); err != nil {
+			return nil, err
+		}
+		blk.freeMe = true
+	}
+
+	if err = t.decompress(blk); err != nil {
+		return nil, y.Wrapf(err, "failed to decode compressed data in file: %s at offset: %d,len: %d", t.Fd.Name(), blk.offset, ko.Len())
+	}
+
+	readPos := len(blk.data) - 4
+	//取后四个字节的到校验和的长度
+	blk.chkLen = int(y.BytesToU32(blk.data[readPos : readPos+4]))
+	if blk.chkLen > len(blk.data) {
+		return nil, errors.New("invalid checksum length,Either the data is corrupted or the table options are incorrectly set")
+	}
+
+	readPos -= blk.chkLen
+	//读取校验和
+	blk.checksum = blk.data[readPos : readPos+blk.chkLen]
+	readPos -= 4
+	//读取entry的数量即key-value个数
+	numEntries := int(y.BytesToU32(blk.data[readPos : readPos+4]))
+	entriesIndexStart := readPos - (numEntries * 4)
+	entriesIndexEnd := entriesIndexStart + numEntries*4
+
+	//读取entry的偏移量
+	blk.entryOffsets = y.BytesToU32Slice(blk.data[entriesIndexStart:entriesIndexEnd])
+	//读取entry 开始时的索引
+	blk.entriesIndexStart = entriesIndexStart
+
+	//读取data值
+	blk.data = blk.data[:readPos+4]
+
+	if t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead {
+		if err = blk.verifyCheckSum(); err != nil {
+			return nil, err
+		}
+	}
+	blk.incrRef()
+	//如果需要使用cache,则将block写到cache中
+	if useCache && t.opt.BlockCache != nil {
+		key := t.blockCacheKey(idx)
+		y.AssertTrue(blk.incrRef())
+		if !t.opt.BlockCache.Set(key, blk, blk.size()) {
+			blk.decrRef()
+		}
+	}
+	return blk, nil
 }
 
 func (t *Table) decompress(b *Block) error {
