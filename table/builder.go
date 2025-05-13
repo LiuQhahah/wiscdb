@@ -195,6 +195,7 @@ func (b *Builder) CutDoneBuildData() buildData {
 		alloc:     b.alloc,
 	}
 	var f y.Filter
+	//如果开启了布隆过滤器
 	if b.opts.BloomFalsePositive > 0 {
 		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opts.BloomFalsePositive)
 		f = y.NewFilter(b.keyHashes, bits)
@@ -223,6 +224,7 @@ func (b *Builder) writeBlockOffset(builder *fbs.Builder, bl *bblock, startOffset
 	return 0
 }
 
+// 构建索引
 func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
 	builder := fbs.NewBuilder(3 << 20) //创建3MB
 	boList, dataSize := b.writeBlockOffsets(builder)
