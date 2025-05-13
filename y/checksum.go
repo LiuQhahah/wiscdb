@@ -9,6 +9,7 @@ import (
 
 var ErrChecksumMismatch = errors.New("checksum mismatch")
 
+// 具体做事的
 func VerifyCheckSum(data []byte, expected *pb.CheckSum) error {
 	actual := CalculateCheckSum(data, expected.Algo)
 	if actual != expected.Sum {

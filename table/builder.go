@@ -3,8 +3,10 @@ package table
 import (
 	"crypto/aes"
 	"encoding/binary"
+	"errors"
 	"github.com/dgraph-io/ristretto/v2/z"
 	fbs "github.com/google/flatbuffers/go"
+	"github.com/klauspost/compress/s2"
 	"math"
 	"runtime"
 	"sync"
@@ -332,15 +334,40 @@ func (b *Builder) DataKey() *pb.DataKey {
 }
 
 func (b *Builder) shouldEncrypt() bool {
-	return false
+	return b.opts.DataKey != nil
 }
 
 func (b *Builder) encrypt(data []byte) ([]byte, error) {
-	return nil, nil
+	iv, err := y.GenerateIV()
+	if err != nil {
+		return data, y.Wrapf(err, "Error while generating IV in Builder.encrypt")
+	}
+	needSz := len(data) + len(iv)
+	dst := b.alloc.Allocate(needSz)
+
+	if err = y.XORBlock(dst[:len(data)], data, b.DataKey().Data, iv); err != nil {
+		return data, y.Wrapf(err, "Error while encrypting in Builder.encrypt")
+	}
+	y.AssertTrue(len(iv) == copy(dst[len(data):], iv))
+	return dst, nil
 }
 
+// 对数据进行压缩
 func (b *Builder) compressData(data []byte) ([]byte, error) {
-	return nil, nil
+	switch b.opts.Compression {
+	case options.None:
+		return data, nil
+	case options.Snappy:
+		sz := s2.MaxEncodedLen(len(data))
+		//分配空间
+		dst := b.alloc.Allocate(sz)
+		return s2.EncodeSnappy(dst, data), nil
+	case options.ZSTD:
+		sz := y.ZSTDCompressBound(len(data))
+		dst := b.alloc.Allocate(sz)
+		return y.ZSTDCompress(dst, data, b.opts.ZSTDCompressionLevel)
+	}
+	return nil, errors.New("Unsupported compression type")
 }
 
 // 对需要的bblock进行压缩和加密
@@ -352,6 +379,7 @@ func (b *Builder) handleBlock() {
 	for item := range b.blockChan {
 		blockBuf := item.data[:item.end]
 		if doCompress {
+			//将压缩完的数据写到out中
 			out, err := b.compressData(blockBuf)
 			y.Check(err)
 			blockBuf = out
@@ -364,6 +392,7 @@ func (b *Builder) handleBlock() {
 		allocatedSpace := maxEncodedLen(b.opts.Compression, item.end) + padding + 1
 		y.AssertTrue(len(blockBuf) <= allocatedSpace)
 
+		//将加密好的数据写到data中
 		item.data = blockBuf
 		item.end = len(blockBuf)
 		b.compressedSize.Add(uint32(len(blockBuf)))
@@ -371,7 +400,13 @@ func (b *Builder) handleBlock() {
 }
 
 func maxEncodedLen(ctype options.CompressionType, sz int) int {
-	return 0
+	switch ctype {
+	case options.Snappy:
+		return s2.MaxEncodedLen(sz)
+	case options.ZSTD:
+		y.ZSTDCompressBound(sz)
+	}
+	return sz
 }
 
 const (

@@ -2,9 +2,12 @@ package table
 
 import (
 	"bytes"
+	"crypto/aes"
 	"fmt"
 	"github.com/dgraph-io/ristretto/v2"
 	"github.com/dgraph-io/ristretto/v2/z"
+	"github.com/klauspost/compress/snappy"
+	"github.com/klauspost/compress/zstd"
 	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
 	"os"
@@ -15,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 	"wiscdb/fb"
+	"wiscdb/internal"
 	"wiscdb/options"
 	"wiscdb/pb"
 	"wiscdb/y"
@@ -288,6 +292,7 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 // 读取table的索引
 func (t *Table) readTableIndex() (*fb.TableIndex, error) {
 	//在table中读取索引
+	//根据table的索引开始时以及索引的长度读取索引值
 	data := t.readNoFail(t.indexStart, t.indexLen)
 	var err error
 	if t.shouldDecrypt() {
@@ -295,18 +300,74 @@ func (t *Table) readTableIndex() (*fb.TableIndex, error) {
 			return nil, y.Wrapf(err, "Error while decrpting table index for the table %d in readTableIndex", t.id)
 		}
 	}
+	//根据解密后的数据得到索引
 	return fb.GetRootAsTableIndex(data, 0), nil
 }
 
+// decrypt 对给定数据进行解密。只有在检查了 shouldDecrypt 后才能调用它。
 func (t *Table) decrypt(data []byte, viaCalloc bool) ([]byte, error) {
-	return nil, nil
+	iv := data[len(data)-aes.BlockSize:]
+	data = data[:len(data)-aes.BlockSize]
+
+	var dst []byte
+	if viaCalloc {
+		dst = z.Calloc(len(data), "Table.Decrypt")
+	} else {
+		dst = make([]byte, len(data))
+	}
+	//使用 AES 加密算法在 CTR (计数器) 模式下进行 XOR 操作
+	// 将加密好的内容写到dst中
+	if err := internal.XORBlock(dst, data, t.opt.DataKey.Data, iv); err != nil {
+		return nil, y.Wrapf(err, "while decrypt")
+	}
+	return dst, nil
 }
 
+// table 校验和
 func (t *Table) VerifyChecksum() error {
+	//读取table 中的索引
+	ti := t.fetchIndex()
+	for i := 0; i < ti.OffsetsLength(); i++ {
+		b, err := t.block(i, true)
+		if err != nil {
+			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d,offset:%d",
+				t.Filename(), i, b.offset)
+		}
+		defer b.decrRef()
+
+		if !(t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead) {
+			// 核实block的校验和
+			if err = b.verifyCheckSum(); err != nil {
+				return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset: %d",
+					t.Filename(), i, b.offset)
+			}
+		}
+	}
 	return nil
 }
+
 func (t *Table) fetchIndex() *fb.TableIndex {
-	return nil
+	if !t.shouldDecrypt() {
+		return t._index
+	}
+	if t.opt.IndexCache == nil {
+		panic("Index cache must be set for encrypted workloads")
+	}
+	//一个table有一个id这个id会用来表示indexcache的内容,返回值是tableIndex
+	//如果有则直接从cache返回
+	if val, ok := t.opt.IndexCache.Get(t.indexKey()); ok && val != nil {
+		return val
+	}
+	//如果cache中没有该id对应的索引,则需要从文件读取table index
+	index, err := t.readTableIndex()
+	y.Check(err)
+	t.opt.IndexCache.Set(t.indexKey(), index, int64(t.indexLen))
+	return index
+}
+
+// table中的id指示的是索引的key
+func (t *Table) indexKey() uint64 {
+	return t.id
 }
 
 /*
@@ -375,6 +436,7 @@ func (t *Table) block(idx int, useCache bool) (*Block, error) {
 		blk.freeMe = true
 	}
 
+	// 解压table中block的内容
 	if err = t.decompress(blk); err != nil {
 		return nil, y.Wrapf(err, "failed to decode compressed data in file: %s at offset: %d,len: %d", t.Fd.Name(), blk.offset, ko.Len())
 	}
@@ -421,6 +483,49 @@ func (t *Table) block(idx int, useCache bool) (*Block, error) {
 }
 
 func (t *Table) decompress(b *Block) error {
+	var dst []byte
+	var err error
+
+	src := b.data
+	switch t.opt.Compression {
+	case options.None:
+		return nil
+	case options.Snappy:
+		if sz, err := snappy.DecodedLen(b.data); err == nil {
+			dst = z.Calloc(sz, "Table.Decompress")
+		} else {
+			dst = z.Calloc(len(b.data)*4, "Table.Decompress")
+		}
+		b.data, err = snappy.Decode(dst, b.data)
+		if err != nil {
+			z.Free(dst)
+			return y.Wrap(err, "failed to decompress")
+		}
+	case options.ZSTD:
+		sz := int(float64(t.opt.BlockSize) * 1.2)
+		var hdr zstd.Header
+		if err := hdr.Decode(b.data); err == nil && hdr.HasFCS && hdr.FrameContentSize < uint64(t.opt.BlockSize*2) {
+			sz = int(hdr.FrameContentSize)
+		}
+		dst = z.Calloc(sz, "Table.Decompress")
+		b.data, err = y.ZSTDDeCompress(dst, b.data)
+		if err != nil {
+			z.Free(dst)
+			return y.Wrap(err, "failed to decompress")
+		}
+	default:
+		return errors.New("Unsupported compression type")
+	}
+	if b.freeMe {
+		z.Free(src)
+		b.freeMe = false
+	}
+
+	if len(b.data) > 0 && len(dst) > 0 && &dst[0] != &b.data[0] {
+		z.Free(dst)
+	} else {
+		b.freeMe = true
+	}
 	return nil
 }
 
