@@ -40,6 +40,7 @@ func (v *ValueStruct) Decode(b []byte) {
 
 }
 
+// 计算valuestruct需要多少字节
 func (v *ValueStruct) EncodedSize() uint32 {
 	sz := binary.PutUvarint(make([]byte, 10), v.ExpiresAt)
 	return uint32(2 + sz + len(v.Value))
