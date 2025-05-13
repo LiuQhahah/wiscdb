@@ -94,7 +94,15 @@ func (b *Builder) AddStaleKey(key []byte, v y.ValueStruct, valueLen uint32) {
 }
 
 func (b *Builder) keyDiff(newKey []byte) []byte {
-	return nil
+	var i int
+	//遍历新key,返回不等于curBlock中的baseKey的key
+	//从第i起就不同
+	for i = 0; i < len(newKey) && i < len(b.curBlock.baseKey); i++ {
+		if newKey[i] != b.curBlock.baseKey[i] {
+			break
+		}
+	}
+	return newKey[i:]
 }
 
 // buildData包含bblock的数据，包含索引，包含校验合，包含文件尺寸大小以及分配
@@ -121,35 +129,46 @@ func (bd *buildData) Copy(dst []byte) int {
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 
+	//将key-value的key进行murmurhash得到key hash写到builder中
 	b.keyHashes = append(b.keyHashes, y.Hash(y.ParseKey(key)))
 
 	if version := y.ParseTs(key); version > b.maxVersion {
 		b.maxVersion = version
 	}
 	var diffKey []byte
+	// 将key追加到当前block的baseKey中
+	// 如果curBlock的baseKey为0表明所有的key都是不同的key
 	if len(b.curBlock.baseKey) == 0 {
 		b.curBlock.baseKey = append(b.curBlock.baseKey[:], key...)
 		diffKey = key
 	} else {
+		//diffKey表示为与curBlock中相比新的key
 		diffKey = b.keyDiff(key)
 	}
 
 	y.AssertTrue(len(key)-len(diffKey) < math.MaxUint16)
 	y.AssertTrue(len(diffKey) <= math.MaxUint16)
+	//diff为新key
+	//overlap表示不是新的key的数量
 	h := header{
 		overlap: uint16(len(key) - len(diffKey)),
 		diff:    uint16(len(diffKey)),
 	}
 	b.curBlock.entryOffsets = append(b.curBlock.entryOffsets, uint32(b.curBlock.end))
 
+	//对header进行编码
 	b.append(h.Encode())
+	//builder中先是header然后是不同的key
 	b.append(diffKey)
 
+	//申请空间
 	dst := b.allocate(int(v.EncodedSize()))
+	//将value写到目的地址中
 	v.Encode(dst)
 	b.onDiskSize += vpLen
 }
 
+// 使用4个字节来存储header的信息,前两个为overlap,后两个为diff
 func (h header) Encode() []byte {
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint16(b[:2], h.overlap)
@@ -305,6 +324,7 @@ func (b *Builder) append(data []byte) {
 	copyLen := copy(dst, data)
 	y.AssertTrue(len(data) == copyLen)
 	//	疑问: 使用copy能否将data复制到builder 的bblock中?
+	//	解答，可以的,使用runtime中的汇编实现复制操作
 }
 
 func (b *Builder) DataKey() *pb.DataKey {
