@@ -15,7 +15,38 @@ func TestBloomBitsPerKey(t *testing.T) {
 		args args
 		want int
 	}{
-		// TODO: Add test cases.
+		{
+			name: "test",
+			args: args{
+				numEntries: 1 << 30,
+				fp:         0.1,
+			},
+			want: 4,
+		},
+		{
+			name: "test2",
+			args: args{
+				numEntries: 1 << 20,
+				fp:         0.001,
+			},
+			want: 10,
+		},
+		{
+			name: "test3",
+			args: args{
+				numEntries: 1 << 20,
+				fp:         0.01,
+			},
+			want: 7,
+		},
+		{
+			name: "test4",
+			args: args{
+				numEntries: 1 << 20,
+				fp:         0.0001,
+			},
+			want: 14,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

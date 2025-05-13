@@ -77,7 +77,7 @@ func DefaultOptions(path string) Options {
 		NumLevelZeroTables:            5,
 		NumLevelZeroTablesStall:       15,
 		NumMemTables:                  5,
-		BloomFalsePositive:            0.01,
+		BloomFalsePositive:            0.01, //允许布隆过滤器的误报率,根据误报率计算需要的key的位数
 		BlockSize:                     4 * 1024,
 		SyncWrites:                    false,
 		NumVersionsToKeep:             1,

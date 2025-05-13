@@ -195,11 +195,12 @@ func (b *Builder) CutDoneBuildData() buildData {
 		alloc:     b.alloc,
 	}
 	var f y.Filter
-	//如果开启了布隆过滤器
+	//如果误报率大于0，表明开启了布隆过滤器,
 	if b.opts.BloomFalsePositive > 0 {
 		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opts.BloomFalsePositive)
 		f = y.NewFilter(b.keyHashes, bits)
 	}
+	//根据布隆过滤器来构建索引
 	index, dataSize := b.buildIndex(f)
 
 	var err error
