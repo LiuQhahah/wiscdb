@@ -514,3 +514,7 @@ func (t *Table) Smallest() []byte {
 func (t *Table) Biggest() []byte {
 	return t.biggest
 }
+
+func (t *Table) DoesNotHave(hash uint32) bool {
+	return false
+}
