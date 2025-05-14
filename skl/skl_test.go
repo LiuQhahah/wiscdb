@@ -602,31 +602,6 @@ func TestIterator_Value(t *testing.T) {
 	}
 }
 
-func TestIterator_ValueUint64(t *testing.T) {
-	type fields struct {
-		list *SkipList
-		n    *node
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		want   uint64
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			i := &Iterator{
-				list: tt.fields.list,
-				n:    tt.fields.n,
-			}
-			if got := i.ValueUint64(); got != tt.want {
-				t.Errorf("ValueUint64() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestNewSkipList(t *testing.T) {
 	type args struct {
 		arenaSize int64

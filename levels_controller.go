@@ -26,7 +26,7 @@ type LevelsController struct {
 	compactStatus compactStatus
 }
 
-func newLevelController(db *internal.DB, mf *internal.Manifest) (*LevelsController, error) {
+func newLevelController(db *DB, mf *Manifest) (*LevelsController, error) {
 	return &LevelsController{}, nil
 }
 
@@ -47,7 +47,7 @@ func (s *LevelsController) cleanupLevels() error {
 func (s *LevelsController) AddLevel0Table(t *table.Table) error {
 	if !t.IsInMemory {
 		err := s.kv.Manifest.AddChanges([]*pb.ManifestChange{
-			internal.NewCreateChange(t.ID(), 0, t.KeyID(), t.CompressionType()),
+			NewCreateChange(t.ID(), 0, t.KeyID(), t.CompressionType()),
 		})
 		if err != nil {
 			return err
@@ -474,7 +474,7 @@ func (s *LevelsController) fillTablesL0ToLBase(cd *compactDef) bool {
 
 type thisAndNextLevelRLocked struct{}
 
-func (s *LevelsController) appendIterator(iters []y.Iterator, opt *internal.IteratorOptions) []y.Iterator {
+func (s *LevelsController) appendIterator(iters []y.Iterator, opt *IteratorOptions) []y.Iterator {
 	return nil
 }
 
@@ -490,14 +490,14 @@ func (s *LevelsController) verifyChecksum() error {
 	return nil
 }
 
-func (s *LevelsController) AppendIterators(iters []y.Iterator, opt *internal.IteratorOptions) []y.Iterator {
+func (s *LevelsController) AppendIterators(iters []y.Iterator, opt *IteratorOptions) []y.Iterator {
 	return nil
 }
 
 // 从L0到LN里面查找key
 func (s *LevelsController) Get(key []byte, maxVs y.ValueStruct, startLevel int) (y.ValueStruct, error) {
 	if s.kv.IsClosed() {
-		return y.ValueStruct{}, internal.ErrDBClosed
+		return y.ValueStruct{}, ErrDBClosed
 	}
 	version := y.ParseTs(key)
 	for _, h := range s.levels {
@@ -530,7 +530,7 @@ func HasAnyPrefixes(s []byte, listOfPrefixes [][]byte) bool {
 }
 
 // open db时被调用
-func newLevelsController(db *internal.DB, mf *internal.Manifest) (*LevelsController, error) {
+func newLevelsController(db *DB, mf *Manifest) (*LevelsController, error) {
 	y.AssertTrue(db.Opt.NumLevelZeroTablesStall > db.Opt.NumLevelZeroTables)
 	levelsController := &LevelsController{
 		kv:     db,
@@ -578,7 +578,7 @@ func newLevelsController(db *internal.DB, mf *internal.Manifest) (*LevelsControl
 		if fileID > maxFileID {
 			maxFileID = fileID
 		}
-		go func(fName string, tf internal.TableManifest) {
+		go func(fName string, tf TableManifest) {
 			var rerr error
 			defer func() {
 				throttle.Done(rerr)
@@ -589,7 +589,7 @@ func newLevelsController(db *internal.DB, mf *internal.Manifest) (*LevelsControl
 				rerr = y.Wrapf(err, "Error while reading datakey")
 				return
 			}
-			tOpt := internal.BuildTableOptions(db)
+			tOpt := BuildTableOptions(db)
 			tOpt.Compression = tf.Compression
 			tOpt.DataKey = dk
 
@@ -629,7 +629,7 @@ func newLevelsController(db *internal.DB, mf *internal.Manifest) (*LevelsControl
 		return nil, y.Wrap(err, "Level validation")
 	}
 
-	if err := internal.SyncDir(db.Opt.Dir); err != nil {
+	if err := SyncDir(db.Opt.Dir); err != nil {
 		_ = levelsController.close()
 		return nil, err
 	}
@@ -647,7 +647,7 @@ func closeAllTables(tables [][]*table.Table) {
 }
 
 // idMap中的id均是sst文件.
-func revertToManifest(kv *internal.DB, mf *internal.Manifest, idMap map[uint64]struct{}) error {
+func revertToManifest(kv *DB, mf *Manifest, idMap map[uint64]struct{}) error {
 	for id := range mf.Tables {
 		//检查manifest中的fileID是否有对应的fileID.sst
 		//如果没有则返回

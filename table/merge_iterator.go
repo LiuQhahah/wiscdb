@@ -1,7 +1,6 @@
 package table
 
 import (
-	"wiscdb/internal"
 	"wiscdb/y"
 )
 
@@ -24,7 +23,7 @@ type node struct {
 type concatIterator struct {
 	idx     int
 	cur     *y.Iterator
-	iters   []*internal.Iterator
+	iters   []*Iterator
 	tables  []*Table
 	options int
 }

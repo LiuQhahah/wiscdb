@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"sync"
-	"wiscdb/internal"
 	"wiscdb/table"
 	"wiscdb/y"
 )
@@ -17,10 +16,10 @@ type levelHandler struct {
 	totalStalSize int64
 	level         int
 	strLevel      string
-	db            *internal.DB
+	db            *DB
 }
 
-func newLevelHandler(db *internal.DB, level int) *levelHandler {
+func newLevelHandler(db *DB, level int) *levelHandler {
 	return &levelHandler{
 		level:    level,
 		strLevel: fmt.Sprintf("l%d", level),

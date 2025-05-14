@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 	"wiscdb/fb"
-	"wiscdb/level"
 	"wiscdb/skl"
 	"wiscdb/table"
 	"wiscdb/y"
@@ -37,7 +36,7 @@ type DB struct {
 	registry      *KeyRegistry
 	imm           []*memTable
 	vlog          valueLog
-	lc            *level.LevelsController
+	lc            *LevelsController
 	flushChan     chan *memTable
 
 	threshold        *vlogThreshold
@@ -569,7 +568,7 @@ func buildL0Table(iter y.Iterator, dropPrefixes [][]byte, bOpts table.Options) *
 	defer iter.Close()
 	b := table.NewTableBuilder(bOpts)
 	for iter.ReWind(); iter.Valid(); iter.Next() {
-		if len(dropPrefixes) > 0 && level.HasAnyPrefixes(iter.Key(), dropPrefixes) {
+		if len(dropPrefixes) > 0 && HasAnyPrefixes(iter.Key(), dropPrefixes) {
 			continue
 		}
 		vs := iter.Value()
