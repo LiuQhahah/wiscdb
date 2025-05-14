@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"github.com/dgraph-io/ristretto/v2/z"
 	"sync"
 	"wiscdb/y"
@@ -27,8 +28,17 @@ func newOracle(opt Options) *oracle {
 func (o *oracle) Stop() {
 
 }
-func (o *oracle) readts() uint64 {
-	return 0
+func (o *oracle) readTs() uint64 {
+	if o.isManaged {
+		panic("ReadTs should not be retrieved for managed DB")
+	}
+	var readTs uint64
+	o.Lock()
+	readTs = o.nextTxnTs - 1
+	o.readMark.Begin(readTs)
+	o.Unlock()
+	y.Check(o.txnMark.WaitForMark(context.Background(), readTs))
+	return readTs
 }
 func (o *oracle) nextTs() uint64 {
 	return 0

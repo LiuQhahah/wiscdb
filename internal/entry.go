@@ -24,7 +24,7 @@ type Entry struct {
 	version      uint64
 	offset       uint32
 	UserMeta     byte
-	meta         byte
+	meta         byte //meta会用来记载该key是否被delete
 	hlen         int
 	valThreshold int64
 }

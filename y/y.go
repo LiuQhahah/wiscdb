@@ -50,8 +50,12 @@ func Copy(a []byte) []byte {
 	return b
 }
 
+// 把key加上时间戳
 func KeyWithTs(key []byte, ts uint64) []byte {
-	return nil
+	out := make([]byte, len(key)+8)
+	copy(out, key)
+	binary.BigEndian.PutUint64(out[len(key):], math.MaxUint64-ts)
+	return out
 }
 
 // 解释key 字节数据的内容,从第8位开始解析

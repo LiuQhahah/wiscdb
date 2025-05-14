@@ -6,6 +6,7 @@ import (
 	"wiscdb/y"
 )
 
+// TODO: item用来描述啥的?
 type Item struct {
 	key       []byte
 	vptr      []byte

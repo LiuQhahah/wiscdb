@@ -40,17 +40,39 @@ type DB struct {
 	lc            *level.LevelsController
 	flushChan     chan *memTable
 
-	threshold   *vlogThreshold
-	orc         *oracle
-	blockWrites atomic.Int32
-	writeCh     chan *request
-	pub         *publisher
-	Register    *KeyRegistry
-	blockCache  *ristretto.Cache[[]byte, *table.Block]
-	indexCache  *ristretto.Cache[uint64, *fb.TableIndex]
-	allocPool   *z.AllocatorPool
-	Manifest    *manifestFile
-	nextMemFid  int
+	threshold        *vlogThreshold
+	orc              *oracle
+	blockWrites      atomic.Int32
+	writeCh          chan *request
+	pub              *publisher
+	Register         *KeyRegistry
+	blockCache       *ristretto.Cache[[]byte, *table.Block]
+	indexCache       *ristretto.Cache[uint64, *fb.TableIndex]
+	allocPool        *z.AllocatorPool
+	Manifest         *manifestFile
+	nextMemFid       int
+	bannedNamespaces *lockedKeys
+}
+
+type lockedKeys struct {
+	sync.RWMutex
+	keys map[uint64]struct{}
+}
+
+func (lk *lockedKeys) add(key uint64) {
+
+}
+func (lk *lockedKeys) has(key uint64) bool {
+	return false
+}
+func (lk *lockedKeys) all() []uint64 {
+	lk.RLock()
+	defer lk.RUnlock()
+	keys := make([]uint64, len(lk.keys))
+	for key, _ := range lk.keys {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 type closer struct {
@@ -129,6 +151,7 @@ func (db *DB) View(fb func(txn *Txn) error) error {
 	if db.Opt.managedTxns {
 		txn = db.NewTransactionAt(math.MaxUint64, false)
 	} else {
+		// 是否是属于更新的transaction,查询 update设置成false
 		txn = db.NewTransaction(false)
 	}
 	defer txn.Discard()
@@ -144,11 +167,31 @@ func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
 	return txn
 }
 func (db *DB) NewTransaction(update bool) *Txn {
-	return &Txn{}
+	return db.newTransaction(update, false)
 }
 
 func (db *DB) newTransaction(update, isManaged bool) *Txn {
-	return &Txn{}
+	if db.Opt.ReadOnly && update {
+		update = false
+	}
+	txn := &Txn{
+		update: update,
+		db:     db,
+		count:  1,
+		size:   int64(len(txnKey) + 10),
+	}
+	// 如果是更新的transaction,则需要检查冲突
+	if update {
+		if db.Opt.DetectConflicts {
+			txn.conflictKeys = make(map[uint64]struct{})
+		}
+		//如果是更新的transaction 需要初始化pendingWrite
+		txn.pendingWrites = make(map[string]*Entry)
+	}
+	if !isManaged {
+		txn.readTs = db.orc.readTs()
+	}
+	return txn
 }
 
 func (db *DB) Update(fn func(txn *Txn) error) error {
@@ -164,6 +207,15 @@ func (db *DB) IsClosed() bool {
 }
 
 func (db *DB) isBanned(key []byte) error {
+	if db.Opt.NamespaceOffset < 0 {
+		return nil
+	}
+	if len(key) <= db.Opt.NamespaceOffset+8 {
+		return nil
+	}
+	if db.bannedNamespaces.has(y.BytesToU64(key[db.Opt.NamespaceOffset:])) {
+		return ErrBannedKey
+	}
 	return nil
 }
 
@@ -550,4 +602,32 @@ func BuildTableOptions(db *DB) table.Options {
 		AllocPool:            db.allocPool,
 		DataKey:              dk,
 	}
+}
+
+func (db *DB) Get(key []byte) (y.ValueStruct, error) {
+	if db.IsClosed() {
+		return y.ValueStruct{}, ErrDBClosed
+	}
+	tables, decr := db.getMemTables()
+	defer decr()
+
+	var maxVs y.ValueStruct
+	//查询的key后8个字节带有查询的时间
+	version := y.ParseTs(key)
+	y.NumGetsAdd(db.Opt.MetricsEnabled, 1)
+	for i := 0; i < len(tables); i++ {
+		vs := tables[i].sl.Get(key)
+		y.NumMemtableGetsAdd(db.Opt.MetricsEnabled, 1)
+		if vs.Meta == 0 && vs.Value == nil {
+			continue
+		}
+		if vs.Version == version {
+			y.NumGetsWithResultAdd(db.Opt.MetricsEnabled, 1)
+			return vs, nil
+		}
+		if maxVs.Version < vs.Version {
+			maxVs = vs
+		}
+	}
+	return db.lc.Get(key, maxVs, 0)
 }
