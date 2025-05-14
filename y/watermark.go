@@ -17,8 +17,10 @@ func (w *WaterMark) Init(closer *z.Closer) {
 
 }
 
+// TODO: WaterMark 水印的作用
 func (w *WaterMark) Begin(index uint64) {
-
+	w.lastIndex.Store(index)
+	w.markCh <- mark{index: index, done: false}
 }
 
 func (w *WaterMark) BeginMany(indices []uint64) {

@@ -495,6 +495,37 @@ func (s *LevelsController) AppendIterators(iters []y.Iterator, opt *internal.Ite
 	return nil
 }
 
+// 从L0到LN里面查找key
+func (s *LevelsController) Get(key []byte, maxVs y.ValueStruct, startLevel int) (y.ValueStruct, error) {
+	if s.kv.IsClosed() {
+		return y.ValueStruct{}, internal.ErrDBClosed
+	}
+	version := y.ParseTs(key)
+	for _, h := range s.levels {
+		if h.level < startLevel {
+			continue
+		}
+		vs, err := h.get(key)
+		if err != nil {
+			return y.ValueStruct{}, y.Wrapf(err, "get key: %q", key)
+		}
+		if vs.Value == nil && vs.Meta == 0 {
+			continue
+		}
+		y.NumBytesReadsLSMAdd(s.kv.Opt.MetricsEnabled, int64(len(vs.Value)))
+		if vs.Version == version {
+			return vs, nil
+		}
+		if maxVs.Version < vs.Version {
+			maxVs = vs
+		}
+	}
+
+	if len(maxVs.Value) > 0 {
+		y.NumGetsWithResultAdd(s.kv.Opt.MetricsEnabled, 1)
+	}
+	return maxVs, nil
+}
 func HasAnyPrefixes(s []byte, listOfPrefixes [][]byte) bool {
 	return false
 }

@@ -151,6 +151,7 @@ func (db *DB) View(fb func(txn *Txn) error) error {
 	if db.Opt.managedTxns {
 		txn = db.NewTransactionAt(math.MaxUint64, false)
 	} else {
+		// 是否是属于更新的transaction,查询 update设置成false
 		txn = db.NewTransaction(false)
 	}
 	defer txn.Discard()
@@ -166,11 +167,31 @@ func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
 	return txn
 }
 func (db *DB) NewTransaction(update bool) *Txn {
-	return &Txn{}
+	return db.newTransaction(update, false)
 }
 
 func (db *DB) newTransaction(update, isManaged bool) *Txn {
-	return &Txn{}
+	if db.Opt.ReadOnly && update {
+		update = false
+	}
+	txn := &Txn{
+		update: update,
+		db:     db,
+		count:  1,
+		size:   int64(len(txnKey) + 10),
+	}
+	// 如果是更新的transaction,则需要检查冲突
+	if update {
+		if db.Opt.DetectConflicts {
+			txn.conflictKeys = make(map[uint64]struct{})
+		}
+		//如果是更新的transaction 需要初始化pendingWrite
+		txn.pendingWrites = make(map[string]*Entry)
+	}
+	if !isManaged {
+		txn.readTs = db.orc.readTs()
+	}
+	return txn
 }
 
 func (db *DB) Update(fn func(txn *Txn) error) error {
@@ -584,5 +605,29 @@ func BuildTableOptions(db *DB) table.Options {
 }
 
 func (db *DB) Get(key []byte) (y.ValueStruct, error) {
-	return y.ValueStruct{}, nil
+	if db.IsClosed() {
+		return y.ValueStruct{}, ErrDBClosed
+	}
+	tables, decr := db.getMemTables()
+	defer decr()
+
+	var maxVs y.ValueStruct
+	//查询的key后8个字节带有查询的时间
+	version := y.ParseTs(key)
+	y.NumGetsAdd(db.Opt.MetricsEnabled, 1)
+	for i := 0; i < len(tables); i++ {
+		vs := tables[i].sl.Get(key)
+		y.NumMemtableGetsAdd(db.Opt.MetricsEnabled, 1)
+		if vs.Meta == 0 && vs.Value == nil {
+			continue
+		}
+		if vs.Version == version {
+			y.NumGetsWithResultAdd(db.Opt.MetricsEnabled, 1)
+			return vs, nil
+		}
+		if maxVs.Version < vs.Version {
+			maxVs = vs
+		}
+	}
+	return db.lc.Get(key, maxVs, 0)
 }

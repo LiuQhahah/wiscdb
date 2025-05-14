@@ -101,8 +101,14 @@ func exceedsSize(prefix string, max int64, key []byte) error {
 	return errors.New(errMessage)
 }
 
+// 将 需要读取的key写到事务的reads中
 func (txn *Txn) addReadKey(key []byte) {
-
+	if txn.update {
+		fp := z.MemHash(key)
+		txn.readsLock.Lock()
+		txn.reads = append(txn.reads, fp)
+		txn.readsLock.Unlock()
+	}
 }
 
 func (txn *Txn) commitAndSend() (func() error, error) {
@@ -222,11 +228,17 @@ func (txn *Txn) Get(key []byte) (item *Item, err error) {
 	} else if txn.discarded {
 		return nil, ErrDiscardedTxn
 	}
+	//判断该可以是不是属于被禁止的key
 	if err := txn.db.isBanned(key); err != nil {
 		return nil, err
 	}
+	//分配内存空间
 	item = new(Item)
+	//如果是写的事务 ，则需要查询事务的pendingWrite中的值.
 	if txn.update {
+		//如果pendingWrite中有值并且是需求的key
+		//同时该key也没有被删除或者过期则直接返回.
+		//这是获取的第一层
 		if e, has := txn.pendingWrites[string(key)]; has && bytes.Equal(key, e.Key) {
 			if table.IsDeletedOrExpired(e.meta, e.ExpiresAt) {
 				item.meta = e.meta
@@ -242,6 +254,7 @@ func (txn *Txn) Get(key []byte) (item *Item, err error) {
 		}
 	}
 	seek := y.KeyWithTs(key, txn.readTs)
+	// 查询key带上了读取的时间戳:一切都是报文
 	vs, err := txn.db.Get(seek)
 	if err != nil {
 		return nil, y.Wrapf(err, "DB::Get Key: %q", key)
