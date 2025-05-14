@@ -13,6 +13,8 @@ var (
 	numBytesWrittenToL0 *expvar.Int
 	numWritesVlog       *expvar.Int
 	numBytesVlogWritten *expvar.Int
+	numLSMBloomHits     *expvar.Map
+	numLSMGets          *expvar.Map
 	numBytesReadLSM     *expvar.Int
 )
 
@@ -75,4 +77,18 @@ func NumWritesVlogAdd(enabled bool, val int64) {
 
 func NumBytesWrittenVlogAdd(enabled bool, val int64) {
 	addInt(enabled, numBytesVlogWritten, val)
+}
+
+func NumLSMBloomHitsAdd(enabled bool, key string, val int64) {
+	addToMap(enabled, numLSMBloomHits, key, val)
+}
+
+func NumLSMGetsAdd(enabled bool, key string, val int64) {
+	addToMap(enabled, numLSMGets, key, val)
+}
+func addToMap(enabled bool, metric *expvar.Map, key string, val int64) {
+	if !enabled {
+		return
+	}
+	metric.Add(key, val)
 }
