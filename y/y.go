@@ -98,8 +98,11 @@ func BytesToU32Slice(b []byte) []uint32 {
 	return nil
 }
 
-func SameKey(str, dst []byte) bool {
-	return false
+func SameKey(src, dst []byte) bool {
+	if len(src) != len(dst) {
+		return false
+	}
+	return bytes.Equal(ParseKey(src), ParseKey(dst))
 }
 
 func FixedDuration(d time.Duration) string {
