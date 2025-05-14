@@ -6,11 +6,8 @@ import (
 	"sort"
 	"time"
 
-
 	"wiscdb/fb"
 	"wiscdb/y"
-	"wiscdb/internal"
-
 )
 
 var (
@@ -212,8 +209,10 @@ func (itr *Iterator) Key() []byte {
 	return itr.bi.key
 }
 
+const BitDelete byte = 1 << 0
+
 func IsDeletedOrExpired(meta byte, expiresAt uint64) bool {
-	if meta&internal.BitDelete > 0 {
+	if meta&BitDelete > 0 {
 		return true
 	}
 	if expiresAt == 0 {
