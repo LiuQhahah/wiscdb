@@ -40,17 +40,39 @@ type DB struct {
 	lc            *level.LevelsController
 	flushChan     chan *memTable
 
-	threshold   *vlogThreshold
-	orc         *oracle
-	blockWrites atomic.Int32
-	writeCh     chan *request
-	pub         *publisher
-	Register    *KeyRegistry
-	blockCache  *ristretto.Cache[[]byte, *table.Block]
-	indexCache  *ristretto.Cache[uint64, *fb.TableIndex]
-	allocPool   *z.AllocatorPool
-	Manifest    *manifestFile
-	nextMemFid  int
+	threshold        *vlogThreshold
+	orc              *oracle
+	blockWrites      atomic.Int32
+	writeCh          chan *request
+	pub              *publisher
+	Register         *KeyRegistry
+	blockCache       *ristretto.Cache[[]byte, *table.Block]
+	indexCache       *ristretto.Cache[uint64, *fb.TableIndex]
+	allocPool        *z.AllocatorPool
+	Manifest         *manifestFile
+	nextMemFid       int
+	bannedNamespaces *lockedKeys
+}
+
+type lockedKeys struct {
+	sync.RWMutex
+	keys map[uint64]struct{}
+}
+
+func (lk *lockedKeys) add(key uint64) {
+
+}
+func (lk *lockedKeys) has(key uint64) bool {
+	return false
+}
+func (lk *lockedKeys) all() []uint64 {
+	lk.RLock()
+	defer lk.RUnlock()
+	keys := make([]uint64, len(lk.keys))
+	for key, _ := range lk.keys {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 type closer struct {
@@ -164,6 +186,15 @@ func (db *DB) IsClosed() bool {
 }
 
 func (db *DB) isBanned(key []byte) error {
+	if db.Opt.NamespaceOffset < 0 {
+		return nil
+	}
+	if len(key) <= db.Opt.NamespaceOffset+8 {
+		return nil
+	}
+	if db.bannedNamespaces.has(y.BytesToU64(key[db.Opt.NamespaceOffset:])) {
+		return ErrBannedKey
+	}
 	return nil
 }
 
@@ -550,4 +581,8 @@ func BuildTableOptions(db *DB) table.Options {
 		AllocPool:            db.allocPool,
 		DataKey:              dk,
 	}
+}
+
+func (db *DB) Get(key []byte) (y.ValueStruct, error) {
+	return y.ValueStruct{}, nil
 }

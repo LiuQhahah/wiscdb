@@ -1,6 +1,10 @@
 package table
 
-import "io"
+import (
+	"io"
+	"time"
+	"wiscdb/internal"
+)
 
 var (
 	REVERSED int = 2
@@ -101,4 +105,14 @@ func (itr *Iterator) Valid() bool {
 // 拿到block iterator中的key作为该table中最大的key
 func (itr *Iterator) Key() []byte {
 	return itr.bi.key
+}
+
+func IsDeletedOrExpired(meta byte, expiresAt uint64) bool {
+	if meta&internal.BitDelete > 0 {
+		return true
+	}
+	if expiresAt == 0 {
+		return false
+	}
+	return expiresAt <= uint64(time.Now().Unix())
 }

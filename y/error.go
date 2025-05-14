@@ -24,9 +24,14 @@ func BytesToU32(b []byte) uint32 {
 	return binary.BigEndian.Uint32(b)
 }
 
+func BytesToU64(b []byte) uint64 {
+	return binary.BigEndian.Uint64(b)
+}
+
 func BytesToU16(b []byte) uint16 {
 	return binary.BigEndian.Uint16(b)
 }
+
 func U16ToBytes(v uint16) (val []byte) {
 	binary.BigEndian.PutUint16(val, v)
 	return

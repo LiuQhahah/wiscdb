@@ -13,4 +13,7 @@ var (
 	ErrTxnTooBig        = errors.New("Txn is too big to fit into one request")
 	ErrConflict         = errors.New("Transaction Conflict. Please retry")
 	ErrBlockedWrites    = errors.New("Writes are blocked,possibly due to DropAll or Close")
+
+	ErrBannedKey   = errors.New("Key is using the banned prefix")
+	ErrKeyNotFound = errors.New("Key not found")
 )
