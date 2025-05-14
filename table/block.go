@@ -1,8 +1,11 @@
 package table
 
 import (
+	"google.golang.org/protobuf/proto"
 	"sync/atomic"
 	"unsafe"
+	"wiscdb/pb"
+	"wiscdb/y"
 )
 
 type Block struct {
@@ -39,6 +42,10 @@ func (b *Block) size() int64 {
 }
 
 func (b *Block) verifyCheckSum() error {
-
-	return nil
+	cs := &pb.CheckSum{}
+	// 将b的checksum 反序列到cs中
+	if err := proto.Unmarshal(b.checksum, cs); err != nil {
+		return y.Wrapf(err, "unable to unmarshal checksum for block")
+	}
+	return y.VerifyCheckSum(b.data, cs)
 }
