@@ -9,7 +9,7 @@ import (
 
 type oracle struct {
 	isManaged       bool
-	deleteConflicts bool
+	detectConflicts bool
 	sync.Mutex
 	writeChLock   sync.Mutex
 	nextTxnTs     uint64
@@ -21,12 +21,22 @@ type oracle struct {
 	closer        *z.Closer
 }
 
+// oracle 可以做冲突检测
 func newOracle(opt Options) *oracle {
-	return &oracle{}
+	orc := &oracle{
+		isManaged:       opt.MetricsEnabled,
+		detectConflicts: opt.DetectConflicts,
+		readMark:        &y.WaterMark{Name: "wisc.PendingReads"},
+		txnMark:         &y.WaterMark{Name: "wisc.TxnTimeStamp"},
+		closer:          z.NewCloser(2),
+	}
+	orc.readMark.Init(orc.closer)
+	orc.txnMark.Init(orc.closer)
+	return orc
 }
 
 func (o *oracle) Stop() {
-
+	o.closer.SignalAndWait()
 }
 func (o *oracle) readTs() uint64 {
 	if o.isManaged {
@@ -41,23 +51,54 @@ func (o *oracle) readTs() uint64 {
 	return readTs
 }
 func (o *oracle) nextTs() uint64 {
-	return 0
+	o.Lock()
+	defer o.Unlock()
+	return o.nextTxnTs
 }
 
 func (o *oracle) incrementNextTs() {
-
+	o.Lock()
+	defer o.Unlock()
+	o.nextTxnTs++
 }
 
-func (o *oracle) setDiscard(ts uint64) {
-
+func (o *oracle) setDiscardTs(ts uint64) {
+	o.Lock()
+	defer o.Unlock()
+	o.discardTs = ts
+	o.cleanupCommittedTransactions()
 }
 
 func (o *oracle) cleanupCommittedTransactions() {
-
+	if !o.detectConflicts {
+		return
+	}
+	var maxReadTs uint64
+	if o.isManaged {
+		maxReadTs = o.discardTs
+	} else {
+		maxReadTs = o.readMark.DoneUntil()
+	}
+	y.AssertTrue(maxReadTs >= o.lastCleanupTs)
+	if maxReadTs == o.lastCleanupTs {
+		return
+	}
+	o.lastCleanupTs = maxReadTs
+	tmp := o.committedTxns[:0]
+	for _, txn := range o.committedTxns {
+		if txn.ts <= maxReadTs {
+			continue
+		}
+		tmp = append(tmp, txn)
+	}
+	o.committedTxns = tmp
 }
 
 func (o *oracle) doneCommit(cts uint64) {
-
+	if o.isManaged {
+		return
+	}
+	o.txnMark.Done(cts)
 }
 
 func (o *oracle) doneRead(txn *Txn) {
@@ -84,6 +125,7 @@ func (o *oracle) hasConflict(txn *Txn) bool {
 	}
 	return false
 }
+
 func (o *oracle) newCommitTs(txn *Txn) (uint64, bool) {
 	o.Lock()
 	defer o.Unlock()
@@ -102,7 +144,7 @@ func (o *oracle) newCommitTs(txn *Txn) (uint64, bool) {
 		ts = txn.commitTs
 	}
 	y.AssertTrue(ts >= o.lastCleanupTs)
-	if o.deleteConflicts {
+	if o.detectConflicts {
 		o.committedTxns = append(o.committedTxns, committedTxn{
 			ts:           ts,
 			conflictKeys: txn.conflictKeys,
