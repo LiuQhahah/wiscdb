@@ -84,6 +84,7 @@ func (txn *Txn) modify(e *Entry) error {
 		return err
 	}
 
+	// 如果开了冲突检测，则将更改的key写到事务的conflictKeys中,供后续事务提交时检测冲突
 	if txn.db.Opt.DetectConflicts {
 		fp := z.MemHash(e.Key)
 		txn.conflictKeys[fp] = struct{}{}
@@ -106,21 +107,26 @@ func (txn *Txn) addReadKey(key []byte) {
 	if txn.update {
 		fp := z.MemHash(key)
 		txn.readsLock.Lock()
+		// 将key的hash值写到事务的reads中,可以用来做冲突检测
 		txn.reads = append(txn.reads, fp)
 		txn.readsLock.Unlock()
 	}
 }
 
+// 用户执行完多次Set方法后 开始提交请求
 func (txn *Txn) commitAndSend() (func() error, error) {
 	orc := txn.db.orc
 	orc.writeChLock.Lock()
 	defer orc.writeChLock.Unlock()
 
+	//创建提交时间戳
 	commitTs, conflict := orc.newCommitTs(txn)
 	if conflict {
 		return nil, ErrConflict
 	}
 	keepTogether := true
+
+	// 如果entry的version已经设置了version,则keepTogether为false
 	setVersion := func(e *Entry) {
 		if e.version == 0 {
 			e.version = commitTs
@@ -128,13 +134,17 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 			keepTogether = false
 		}
 	}
+	//遍历事务的pendingWrites的值,设置Entry的version是commitTs
 	for _, e := range txn.pendingWrites {
 		setVersion(e)
 	}
 
+	// 遍历事务的duplicateWrites,设置Entry的version为commitTs
 	for _, e := range txn.duplicateWrites {
 		setVersion(e)
 	}
+
+	// 构建entry list,长度为pendingWrite+duplicateWrite另外再+1
 	entries := make([]*Entry, 0, len(txn.pendingWrites)+len(txn.duplicateWrites)+1)
 
 	processEntry := func(e *Entry) {
@@ -144,26 +154,40 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 		}
 		entries = append(entries, e)
 	}
+
+	// 更新完version,调用processEntry处理pendingWrites中的Entry
 	for _, e := range txn.pendingWrites {
 		processEntry(e)
 	}
+
+	// 更新完version,调用processEntry处理duplicateWrites中的Entry
 	for _, e := range txn.duplicateWrites {
 		processEntry(e)
 	}
+
+	// TODO: keepTogether意味着什么?
 	if keepTogether {
 		y.AssertTrue(commitTs != 0)
+		// 构建Entry key为wiscDB并且携带提交时间戳
 		e := &Entry{
-			Key:   y.KeyWithTs(txnKey, commitTs),
+			Key: y.KeyWithTs(txnKey, commitTs),
+			// value存储出的是提交时间戳
 			Value: []byte(strconv.FormatUint(commitTs, 10)),
-			meta:  bitFinTxn,
+			meta:  bitFinTxn, // meta表FIN标志
 		}
+		// 这是entries最后一个entries用来表示报文的结束位
+		// 这也是entries长度+1的原因
+		//	entries := make([]*Entry, 0, len(txn.pendingWrites)+len(txn.duplicateWrites)+1)
 		entries = append(entries, e)
 	}
+	//将这些entries发送给writeCh中
 	req, err := txn.db.sendToWriteCh(entries)
+	// 无论是否有错都会在oracle中完成该事务提交
 	if err != nil {
 		orc.doneCommit(commitTs)
 		return nil, err
 	}
+	// 提交后就在等待
 	ret := func() error {
 		err := req.Wait()
 		orc.doneCommit(commitTs)

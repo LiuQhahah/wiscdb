@@ -44,6 +44,8 @@ func (w *WaterMark) BeginMany(indices []uint64) {
 }
 
 // 将index写到WaterMark的markCh中
+// index为事务的readTs值
+// 将mark中 done字段设置成true
 func (w *WaterMark) Done(index uint64) {
 	w.markCh <- mark{
 		index: index,

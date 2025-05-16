@@ -107,6 +107,7 @@ func (db *DB) newMemTable() (*memTable, error) {
 // create/create memtable with file id.
 func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 	filePath := db.getFilePathWithFid(fid)
+	// 指定MB创建跳表
 	s := skl.NewSkipList(arenaSize(db.Opt))
 	memtable := &memTable{
 		sl:  s,
@@ -222,6 +223,7 @@ func (db *DB) BanNamespace(ns uint64) error {
 	return nil
 }
 
+// 对request创建pool,可以重复利用
 var requestPool = sync.Pool{
 	New: func() interface{} {
 		return new(request)
@@ -229,19 +231,25 @@ var requestPool = sync.Pool{
 }
 
 func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
+	// 判断当前db的blockWrite状态
 	if db.blockWrites.Load() == 1 {
 		return nil, ErrBlockedWrites
 	}
 	var count, size int64
+	// 遍历entries,计算存储的尺寸以及entries个数
 	for _, e := range entries {
 		size += e.estimateSizeAndSetThreshold(db.valueThreshold())
 		count++
 	}
 	y.NumBytesWrittenUserAdd(db.Opt.MetricsEnabled, size)
+	// 限制批处理的个数以及批处理的尺寸
+	// 批处理的个数和尺寸会决定内存的大小
 	if count >= db.Opt.maxBatchCount || size >= db.Opt.maxBatchSize {
 		return nil, ErrTxnTooBig
 	}
+	// 从池中取得request
 	req := requestPool.Get().(*request)
+	// 重置request
 	req.reset()
 	req.Entries = entries
 	req.Wg.Add(1)
@@ -276,7 +284,7 @@ func (db *DB) NewStreamAt(readTs uint64) *Stream {
 
 默认大小： 64<<20(64MiB) + 10 + 88*100
 
-TODO: maxBatchSize 的作用
+maxBatchSize 的作用 : 批处理是一个事务能处理的最大字节数
 TODO: MaxNodeSize指的是什么
 default size: MemTableSize:64MiB.
 */

@@ -59,6 +59,8 @@ func newArena(n int64) *Arena {
 	out := &Arena{
 		buf: make([]byte, n),
 	}
+	//  Store 等同于Set操作,Load等同于Get操作
+	// TODO: n为什么要设定为1?
 	out.n.Store(1)
 	return out
 }
