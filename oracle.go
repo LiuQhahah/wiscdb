@@ -130,6 +130,7 @@ func (o *oracle) hasConflict(txn *Txn) bool {
 		// 遍历事务中的被hash的key
 		for _, ro := range txn.reads {
 			// 如果被hash的key存储在conflictKeys中则返回true
+			// 如果key已经在之前事务中存在,则表示有冲突即至少两个事务会持有一个key.
 			if _, has := committedTxn.conflictKeys[ro]; has {
 				return true
 			}

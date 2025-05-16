@@ -87,6 +87,7 @@ func (txn *Txn) modify(e *Entry) error {
 	// 如果开了冲突检测，则将更改的key写到事务的conflictKeys中,供后续事务提交时检测冲突
 	if txn.db.Opt.DetectConflicts {
 		fp := z.MemHash(e.Key)
+		// 将所有的key写到冲突检测map中
 		txn.conflictKeys[fp] = struct{}{}
 	}
 
@@ -187,7 +188,7 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 		orc.doneCommit(commitTs)
 		return nil, err
 	}
-	// 提交后就在等待
+	// 提交后就在等待,由上游调用函数执行
 	ret := func() error {
 		err := req.Wait()
 		orc.doneCommit(commitTs)
@@ -227,6 +228,7 @@ func (txn *Txn) Commit() error {
 	if err != nil {
 		return err
 	}
+	// 执行txnCb()函数等待协程完成
 	return txnCb()
 }
 

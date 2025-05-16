@@ -26,7 +26,7 @@ type Entry struct {
 	UserMeta     byte
 	meta         byte //meta会用来记载该key是否被delete
 	hlen         int
-	valThreshold int64
+	valThreshold int64 // 设置一个阈值,超过阈值则只写入value的地址,小于阈值就直接存储value到内存中
 }
 
 // 判断当前Entry为空
@@ -45,7 +45,8 @@ func (e *Entry) estimateSizeAndSetThreshold(threshold int64) int64 {
 		return k + v + 2
 	}
 	//如果value的大小大于等于设定的value threshold,那么就用valuePointer的指作为返回值.
-	//TODO: 为什么要执行 int64(unsafe.Sizeof(valuePointer{}))
+	// 如果key对应的value值大于设定的阈值,那么value的值就是value地址的值了此时就需要用int64(unsafe.Sizeof(valuePointer{}))
+	// TODO: 2的含义是什么
 	return k + int64(unsafe.Sizeof(valuePointer{})) + 2
 }
 
