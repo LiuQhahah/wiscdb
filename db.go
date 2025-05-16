@@ -444,68 +444,98 @@ func (db *DB) ensureRoomForWrite() error {
 	}
 }
 
+//批量写入（Batching）
+//
+//收集多个请求后一次性写入，减少 I/O 次数，提高吞吐量。
+//
+//并发控制（pendingCh）
+//
+//限制同时只有一个 writeRequests 在执行，避免资源竞争。
+//
+//优雅关闭（lc.HasBeenClosed()）
+//
+//关闭时确保所有 pending 请求被处理，避免数据丢失。
+//
+//动态调整写入触发条件
+//
+//基于请求堆积量（3*kvWriteChCapacity）和令牌可用性（pendingCh）决定何时写入。
+//
+//监控（expvar.Int）
+//
+//暴露 reqLen 指标，便于观察堆积情况。
+
 // DB 被调用后就会执行函数，用于一直监听事件.
 // 会通过协程来调用，不会阻塞主线程但是可以一直在后台执行
 func (db *DB) doWrites(lc *z.Closer) {
+	// 确保在退出时通知 Closer（用于优雅关闭）
 	defer lc.Done()
+	// 本质是一个二进制信号量
+	// 控制并发写入的令牌桶（最大并发=1）
 	pendingCh := make(chan struct{}, 1)
 	//创建一个闭包函数与直接调用db的writeRequests相比添加了一条处理完后返回pendingCh的输出
 	//pendingCh用来标识阻塞，成功后就可以返回表示处理完毕
 	writeRequests := func(reqs []*request) {
-		if err := db.writeRequests(reqs); err != nil {
-			db.Opt.Errorf("writeRequests: %v", err)
+		if err := db.writeRequests(reqs); err != nil { // 执行批量写入
+			db.Opt.Errorf("writeRequests: %v", err) // 出错时打印日志
 		}
 		//会一直阻塞知道pendingCh的channel中有数据
 		//有数据输出就会执行，没有数据就会一直等待.
+		// 释放令牌，允许新的写入
 		<-pendingCh
 	}
 
+	// 用于监控 pending 请求数量
 	reqLen := new(expvar.Int)
 	y.PendingWritesSet(db.Opt.MetricsEnabled, db.Opt.Dir, reqLen)
 	//初始化slice,超过10后会自动扩容
+	// 初始化请求缓冲区（容量=10）
 	reqs := make([]*request, 0, 10)
 	for {
 		var r *request
 		select {
-		case r = <-db.writeCh: //writechan中有值就会做一个赋值处理,交给下面append来做
-		case <-lc.HasBeenClosed():
+		case r = <-db.writeCh: //writechan中有值就会做一个赋值处理,交给下面append来做 从写入 channel 读取请求
+		case <-lc.HasBeenClosed(): // 如果收到关闭信号，进入清理逻辑
 			goto closedCase
 		}
 		for {
-			reqs = append(reqs, r)
+			reqs = append(reqs, r) // 加入待处理列表
 			//set metric
 			reqLen.Set(int64(len(reqs)))
 			//if reqs's length greater than 3000, will call write method
-			if len(reqs) >= 3*kvWriteChCapacity {
+			if len(reqs) >= 3*kvWriteChCapacity { // 如果堆积过多，立即触发写入
 				//第一个条件中的阻塞发送确保信号被接收后才会继续
+				// 占用令牌（可能阻塞）
+				// 准备处理request时就要占用令牌
 				pendingCh <- struct{}{}
 				goto writeCase
 			}
 			select {
-			case r = <-db.writeCh:
+			case r = <-db.writeCh: // 继续读取新请求
 			//	pendingCh是缓冲为1的通道，每次只能容纳一个信号
 			//第二个条件中的非阻塞发送确保不会重复发送
-			case pendingCh <- struct{}{}:
+			case pendingCh <- struct{}{}: // 如果能获取令牌，立即触发写入 如果能写入
 				goto writeCase
-			case <-lc.HasBeenClosed():
+			case <-lc.HasBeenClosed(): // 如果关闭，进入清理
 				goto closedCase
 			}
 		}
 	closedCase:
 		for {
 			select {
-			case r = <-db.writeCh:
+			case r = <-db.writeCh: // 继续消费剩余请求
 				reqs = append(reqs, r)
-			default:
-				pendingCh <- struct{}{}
-				writeRequests(reqs)
-				return
+			default: // 没有剩余请求时，执行最后一次写入并退出
+				pendingCh <- struct{}{} // 占用令牌
+				writeRequests(reqs)     // 同步写入（确保所有数据落盘）
+				return                  // 退出 goroutine
 			}
 		}
 	writeCase:
+		// 异步执行写入
 		go writeRequests(reqs)
-		//new request
+		// 重置缓冲区
 		reqs = make([]*request, 10)
+		// 重置监控指标
 		reqLen.Set(0)
 	}
 }
