@@ -94,6 +94,14 @@ func (vLogFile *writeAheadLog) encodeEntry(buf *bytes.Buffer, e *Entry, offset u
 }
 
 func (vLogFile *writeAheadLog) writeEntry(buf *bytes.Buffer, e *Entry, opt Options) error {
+	buf.Reset()
+	pLen, err := vLogFile.encodeEntry(buf, e, vLogFile.writeAt)
+	if err != nil {
+		return err
+	}
+	y.AssertTrue(pLen == copy(vLogFile.Data[vLogFile.writeAt:], buf.Bytes()))
+	vLogFile.writeAt += uint32(pLen)
+	vLogFile.zeroNextEntry()
 	return nil
 }
 
@@ -225,6 +233,7 @@ loop:
 		vp.Offset = entryResult.offset
 		vp.Fid = vLogFile.fid
 
+		// go中的switch不需要break如果满足直接执行case中内容，如果不满足才会执行default中操作
 		switch {
 		//如果entry的mete值 第6位有值
 		//	表明是正常的Entry
