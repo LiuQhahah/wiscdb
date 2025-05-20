@@ -131,7 +131,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			buf.Reset()
 			e := b.Entries[j]
 			valueSizes = append(valueSizes, int64(len(e.Value)))
-			if e.skipVlogAndSetThreshold(vlog.db.valueThreshold()) {
+			if e.skipVlogAndSetThreshold(vlog.db.valueThreshold(), valueSizes[j]) {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
 				continue
 			}

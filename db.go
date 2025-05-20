@@ -380,7 +380,7 @@ func (db *DB) writeToLSM(b *request) error {
 	}
 	for i, entry := range b.Entries {
 		var err error
-		if entry.skipVlogAndSetThreshold(db.valueThreshold()) {
+		if entry.skipVlogAndSetThreshold(db.valueThreshold(), int64(len(entry.Value))) {
 			err = db.mt.Put(entry.Key, y.ValueStruct{
 				Value:     entry.Value,
 				Meta:      entry.meta &^ bitValuePointer,
@@ -466,6 +466,12 @@ func (db *DB) ensureRoomForWrite() error {
 
 // DB 被调用后就会执行函数，用于一直监听事件.
 // 会通过协程来调用，不会阻塞主线程但是可以一直在后台执行
+
+// 需求	实现方式
+// 持续消费请求	case r = <-db.writeCh 逐步读取
+// 低延迟写入	pendingCh 空闲时立即触发
+// 高吞吐写入	队列满时批量触发
+// 避免阻塞	select 多路监听
 func (db *DB) doWrites(lc *z.Closer) {
 	// 确保在退出时通知 Closer（用于优雅关闭）
 	defer lc.Done()
@@ -492,8 +498,9 @@ func (db *DB) doWrites(lc *z.Closer) {
 	reqs := make([]*request, 0, 10)
 	for {
 		var r *request
+		// 在执行下面for循环时,先扫一个两个channel中的值
 		select {
-		case r = <-db.writeCh: //writechan中有值就会做一个赋值处理,交给下面append来做 从写入 channel 读取请求
+		case r = <-db.writeCh: // 如果db.writeCh有值,则将值赋值给r
 		case <-lc.HasBeenClosed(): // 如果收到关闭信号，进入清理逻辑
 			goto closedCase
 		}
@@ -510,9 +517,13 @@ func (db *DB) doWrites(lc *z.Closer) {
 				goto writeCase
 			}
 			select {
-			case r = <-db.writeCh: // 继续读取新请求
+			// 连续向writeCh中写入数据
+			//
+			case r = <-db.writeCh: // 刷新一下db writeCh中的值,如果有貌似并不会写到reqs中,只能等到channel遍历完才会写到reqs中
 			//	pendingCh是缓冲为1的通道，每次只能容纳一个信号
 			//第二个条件中的非阻塞发送确保不会重复发送
+			// 如果pendingCh还有容量,尝试获取令牌
+			//则进入写操作，所以至少要向writeCh中写两次，才会去执行写操作
 			case pendingCh <- struct{}{}: // 如果能获取令牌，立即触发写入 如果能写入
 				goto writeCase
 			case <-lc.HasBeenClosed(): // 如果关闭，进入清理

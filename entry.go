@@ -97,9 +97,9 @@ func (e *Entry) WithDiscard() *Entry {
 	return e
 }
 
-func (e *Entry) skipVlogAndSetThreshold(threshold int64) bool {
+func (e *Entry) skipVlogAndSetThreshold(threshold int64, valueSize int64) bool {
 	if e.valThreshold == 0 {
 		e.valThreshold = threshold
 	}
-	return int64(len(e.Value)) < e.valThreshold
+	return valueSize < e.valThreshold
 }
