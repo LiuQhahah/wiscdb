@@ -109,8 +109,10 @@ func (vLogFile *writeAheadLog) encryptionEnabled() bool {
 	return vLogFile.dataKey != nil
 }
 
+// 为下一个Entry写入做到清扫工作
+// 在预写日志（Write-Ahead Log, WAL）中清零下一个条目的头部区域，以确保后续写入不会读到脏数据或残留数据
 func (vLogFile *writeAheadLog) zeroNextEntry() {
-
+	z.ZeroOut(vLogFile.Data, int(vLogFile.writeAt), int(vLogFile.writeAt+maxHeaderSize))
 }
 
 // IV指的是 Initialization vector
