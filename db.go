@@ -424,6 +424,9 @@ func (db *DB) ensureRoomForWrite() error {
 	select {
 	//如果db的memTable channel中有值
 	//	如果db的memtable有值，就会执行case里的函数体
+	//	将memtable转移到db的immutable中
+	//	成功刷到db的immutable channel中
+	//	case为true才会执行里面的内容
 	case db.flushChan <- db.mt:
 		db.Opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n", db.mt.sl.MemSize(), len(db.flushChan))
 		//将memtable写到immutable中

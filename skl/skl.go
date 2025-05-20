@@ -185,7 +185,7 @@ func NewSkipList(arenaSize int64) *SkipList {
 	s := &SkipList{head: head, arena: arena}
 	s.height.Store(1)
 	s.ref.Store(1)
-	return nil
+	return s
 }
 
 // set value into node.
