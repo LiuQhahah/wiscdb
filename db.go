@@ -351,7 +351,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 		var err error
 		for err = db.ensureRoomForWrite(); err == errNoRoom; err = db.ensureRoomForWrite() {
 			i++
-			for i%100 == 0 {
+			if i%100 == 0 {
 				db.Opt.Debugf("Making room for writes")
 			}
 			time.Sleep(10 * time.Millisecond)
