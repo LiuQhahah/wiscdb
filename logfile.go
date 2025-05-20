@@ -227,6 +227,7 @@ loop:
 
 		switch {
 		//如果entry的mete值 第6位有值
+		//	表明是正常的Entry
 		case entryResult.meta&bitTxn > 0:
 			//获取事务提交的时间戳
 			txnTs := y.ParseTs(entryResult.Key)
@@ -243,7 +244,7 @@ loop:
 			vptrs = append(vptrs, vp)
 
 		//如果entry的meta值第7位有值
-		// TODO: 暂时没有找到设置meta的code
+		// 表明是事务的最后一个Entry
 		// 会调用传入的函数fn执行
 		case entryResult.meta&bitFinTxn > 0:
 			txnTs, err := strconv.ParseUint(string(entryResult.Value), 10, 64)
