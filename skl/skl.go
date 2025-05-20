@@ -59,6 +59,8 @@ func newArena(n int64) *Arena {
 	out := &Arena{
 		buf: make([]byte, n),
 	}
+	//  Store 等同于Set操作,Load等同于Get操作
+	// TODO: n为什么要设定为1?
 	out.n.Store(1)
 	return out
 }
@@ -183,7 +185,7 @@ func NewSkipList(arenaSize int64) *SkipList {
 	s := &SkipList{head: head, arena: arena}
 	s.height.Store(1)
 	s.ref.Store(1)
-	return nil
+	return s
 }
 
 // set value into node.

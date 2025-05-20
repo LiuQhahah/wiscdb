@@ -107,6 +107,7 @@ func (db *DB) newMemTable() (*memTable, error) {
 // create/create memtable with file id.
 func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 	filePath := db.getFilePathWithFid(fid)
+	// 指定MB创建跳表
 	s := skl.NewSkipList(arenaSize(db.Opt))
 	memtable := &memTable{
 		sl:  s,
@@ -222,6 +223,7 @@ func (db *DB) BanNamespace(ns uint64) error {
 	return nil
 }
 
+// 对request创建pool,可以重复利用
 var requestPool = sync.Pool{
 	New: func() interface{} {
 		return new(request)
@@ -229,19 +231,25 @@ var requestPool = sync.Pool{
 }
 
 func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
+	// 判断当前db的blockWrite状态
 	if db.blockWrites.Load() == 1 {
 		return nil, ErrBlockedWrites
 	}
 	var count, size int64
+	// 遍历entries,计算存储的尺寸以及entries个数
 	for _, e := range entries {
 		size += e.estimateSizeAndSetThreshold(db.valueThreshold())
 		count++
 	}
 	y.NumBytesWrittenUserAdd(db.Opt.MetricsEnabled, size)
+	// 限制批处理的个数以及批处理的尺寸
+	// 批处理的个数和尺寸会决定内存的大小
 	if count >= db.Opt.maxBatchCount || size >= db.Opt.maxBatchSize {
 		return nil, ErrTxnTooBig
 	}
+	// 从池中取得request
 	req := requestPool.Get().(*request)
+	// 重置request
 	req.reset()
 	req.Entries = entries
 	req.Wg.Add(1)
@@ -276,7 +284,7 @@ func (db *DB) NewStreamAt(readTs uint64) *Stream {
 
 默认大小： 64<<20(64MiB) + 10 + 88*100
 
-TODO: maxBatchSize 的作用
+maxBatchSize 的作用 : 批处理是一个事务能处理的最大字节数
 TODO: MaxNodeSize指的是什么
 default size: MemTableSize:64MiB.
 */
@@ -343,7 +351,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 		var err error
 		for err = db.ensureRoomForWrite(); err == errNoRoom; err = db.ensureRoomForWrite() {
 			i++
-			for i%100 == 0 {
+			if i%100 == 0 {
 				db.Opt.Debugf("Making room for writes")
 			}
 			time.Sleep(10 * time.Millisecond)
@@ -372,7 +380,7 @@ func (db *DB) writeToLSM(b *request) error {
 	}
 	for i, entry := range b.Entries {
 		var err error
-		if entry.skipVlogAndSetThreshold(db.valueThreshold()) {
+		if entry.skipVlogAndSetThreshold(db.valueThreshold(), int64(len(entry.Value))) {
 			err = db.mt.Put(entry.Key, y.ValueStruct{
 				Value:     entry.Value,
 				Meta:      entry.meta &^ bitValuePointer,
@@ -416,6 +424,9 @@ func (db *DB) ensureRoomForWrite() error {
 	select {
 	//如果db的memTable channel中有值
 	//	如果db的memtable有值，就会执行case里的函数体
+	//	将memtable转移到db的immutable中
+	//	成功刷到db的immutable channel中
+	//	case为true才会执行里面的内容
 	case db.flushChan <- db.mt:
 		db.Opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n", db.mt.sl.MemSize(), len(db.flushChan))
 		//将memtable写到immutable中
@@ -436,68 +447,109 @@ func (db *DB) ensureRoomForWrite() error {
 	}
 }
 
+//批量写入（Batching）
+//
+//收集多个请求后一次性写入，减少 I/O 次数，提高吞吐量。
+//
+//并发控制（pendingCh）
+//
+//限制同时只有一个 writeRequests 在执行，避免资源竞争。
+//
+//优雅关闭（lc.HasBeenClosed()）
+//
+//关闭时确保所有 pending 请求被处理，避免数据丢失。
+//
+//动态调整写入触发条件
+//
+//基于请求堆积量（3*kvWriteChCapacity）和令牌可用性（pendingCh）决定何时写入。
+//
+//监控（expvar.Int）
+//
+//暴露 reqLen 指标，便于观察堆积情况。
+
 // DB 被调用后就会执行函数，用于一直监听事件.
 // 会通过协程来调用，不会阻塞主线程但是可以一直在后台执行
+
+// 需求	实现方式
+// 持续消费请求	case r = <-db.writeCh 逐步读取
+// 低延迟写入	pendingCh 空闲时立即触发
+// 高吞吐写入	队列满时批量触发
+// 避免阻塞	select 多路监听
 func (db *DB) doWrites(lc *z.Closer) {
+	// 确保在退出时通知 Closer（用于优雅关闭）
 	defer lc.Done()
+	// 本质是一个二进制信号量
+	// 控制并发写入的令牌桶（最大并发=1）
 	pendingCh := make(chan struct{}, 1)
 	//创建一个闭包函数与直接调用db的writeRequests相比添加了一条处理完后返回pendingCh的输出
 	//pendingCh用来标识阻塞，成功后就可以返回表示处理完毕
 	writeRequests := func(reqs []*request) {
-		if err := db.writeRequests(reqs); err != nil {
-			db.Opt.Errorf("writeRequests: %v", err)
+		if err := db.writeRequests(reqs); err != nil { // 执行批量写入
+			db.Opt.Errorf("writeRequests: %v", err) // 出错时打印日志
 		}
 		//会一直阻塞知道pendingCh的channel中有数据
 		//有数据输出就会执行，没有数据就会一直等待.
+		// 释放令牌，允许新的写入
 		<-pendingCh
 	}
 
+	// 用于监控 pending 请求数量
 	reqLen := new(expvar.Int)
 	y.PendingWritesSet(db.Opt.MetricsEnabled, db.Opt.Dir, reqLen)
 	//初始化slice,超过10后会自动扩容
+	// 初始化请求缓冲区（容量=10）
 	reqs := make([]*request, 0, 10)
 	for {
 		var r *request
+		// 在执行下面for循环时,先扫一个两个channel中的值
 		select {
-		case r = <-db.writeCh: //writechan中有值就会做一个赋值处理,交给下面append来做
-		case <-lc.HasBeenClosed():
+		case r = <-db.writeCh: // 如果db.writeCh有值,则将值赋值给r
+		case <-lc.HasBeenClosed(): // 如果收到关闭信号，进入清理逻辑
 			goto closedCase
 		}
 		for {
-			reqs = append(reqs, r)
+			reqs = append(reqs, r) // 加入待处理列表
 			//set metric
 			reqLen.Set(int64(len(reqs)))
 			//if reqs's length greater than 3000, will call write method
-			if len(reqs) >= 3*kvWriteChCapacity {
+			if len(reqs) >= 3*kvWriteChCapacity { // 如果堆积过多，立即触发写入
 				//第一个条件中的阻塞发送确保信号被接收后才会继续
+				// 占用令牌（可能阻塞）
+				// 准备处理request时就要占用令牌
 				pendingCh <- struct{}{}
 				goto writeCase
 			}
 			select {
-			case r = <-db.writeCh:
+			// 连续向writeCh中写入数据
+			//
+			case r = <-db.writeCh: // 刷新一下db writeCh中的值,如果有貌似并不会写到reqs中,只能等到channel遍历完才会写到reqs中
 			//	pendingCh是缓冲为1的通道，每次只能容纳一个信号
 			//第二个条件中的非阻塞发送确保不会重复发送
-			case pendingCh <- struct{}{}:
+			// 如果pendingCh还有容量,尝试获取令牌
+			//则进入写操作，所以至少要向writeCh中写两次，才会去执行写操作
+			case pendingCh <- struct{}{}: // 如果能获取令牌，立即触发写入 如果能写入
 				goto writeCase
-			case <-lc.HasBeenClosed():
+			case <-lc.HasBeenClosed(): // 如果关闭，进入清理
 				goto closedCase
 			}
 		}
 	closedCase:
 		for {
 			select {
-			case r = <-db.writeCh:
+			case r = <-db.writeCh: // 继续消费剩余请求
 				reqs = append(reqs, r)
-			default:
-				pendingCh <- struct{}{}
-				writeRequests(reqs)
-				return
+			default: // 没有剩余请求时，执行最后一次写入并退出
+				pendingCh <- struct{}{} // 占用令牌
+				writeRequests(reqs)     // 同步写入（确保所有数据落盘）
+				return                  // 退出 goroutine
 			}
 		}
 	writeCase:
+		// 异步执行写入
 		go writeRequests(reqs)
-		//new request
+		// 重置缓冲区
 		reqs = make([]*request, 10)
+		// 重置监控指标
 		reqLen.Set(0)
 	}
 }
