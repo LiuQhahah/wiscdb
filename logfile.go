@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/aes"
+	cryptorand "crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
+
 	"github.com/dgraph-io/ristretto/v2/z"
 	"hash/crc32"
 	"io"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -138,7 +141,37 @@ func (vLogFile *writeAheadLog) doneWriting(offset uint32) error {
 }
 
 func (vLogFile *writeAheadLog) open(path string, flags int, fSize int64) error {
-	return nil
+	mf, ferr := z.OpenMmapFile(path, flags, int(fSize))
+	vLogFile.MmapFile = mf
+
+	// 如果是个新文件,初始化valueLog
+	if ferr == z.NewFile {
+		if err := vLogFile.bootstrap(); err != nil {
+			os.Remove(path)
+			return err
+		}
+		vLogFile.size.Store(vlogHeaderSize)
+	} else if ferr != nil {
+		return y.Wrapf(ferr, "while opening file: %s", path)
+	}
+	vLogFile.size.Store(uint32(len(vLogFile.Data)))
+
+	if vLogFile.size.Load() < vlogHeaderSize {
+		return nil
+	}
+	buf := make([]byte, vlogHeaderSize)
+	y.AssertTruef(vlogHeaderSize == copy(buf, vLogFile.Data), "Unable to copy from %s, size %d", path, vLogFile.size.Load())
+	keyID := binary.BigEndian.Uint64(buf[:8])
+
+	if dk, err := vLogFile.registry.DataKey(keyID); err != nil {
+		return y.Wrapf(err, "While opening vlog file %d", vLogFile.fid)
+	} else {
+		vLogFile.dataKey = dk
+	}
+	vLogFile.baseIV = buf[8:]
+	y.AssertTrue(len(vLogFile.baseIV) == 12)
+
+	return ferr
 }
 
 var errTruncate = errors.New("Do truncate")
@@ -252,6 +285,26 @@ loop:
 var errStop = errors.New("Stop iteration")
 
 func (vLogFile *writeAheadLog) bootstrap() error {
+	var err error
+	var dk *pb.DataKey
+
+	// 读取最新的DataKey
+	if dk, err = vLogFile.registry.LatestDataKey(); err != nil {
+		return y.Wrapf(err, "Error while retrieving datakey in logFile.bootstarp")
+	}
+	vLogFile.dataKey = dk
+	buf := make([]byte, vlogHeaderSize)
+	binary.BigEndian.PutUint64(buf[:8], vlogHeaderSize)
+	binary.BigEndian.PutUint64(buf[:8], vLogFile.keyID())
+	if _, err := cryptorand.Read(buf[:8]); err != nil {
+		return y.Wrapf(err, "Error while creating base IV, while creating logfile")
+	}
+
+	vLogFile.baseIV = buf[8:]
+	y.AssertTrue(len(vLogFile.baseIV) == 12)
+	y.AssertTrue(vlogHeaderSize == copy(vLogFile.Data[0:], buf))
+
+	vLogFile.zeroNextEntry()
 	return nil
 }
 
