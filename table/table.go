@@ -18,7 +18,6 @@ import (
 	"sync/atomic"
 	"time"
 	"wiscdb/fb"
-	"wiscdb/internal"
 	"wiscdb/options"
 	"wiscdb/pb"
 	"wiscdb/y"
@@ -317,7 +316,7 @@ func (t *Table) decrypt(data []byte, viaCalloc bool) ([]byte, error) {
 	}
 	//使用 AES 加密算法在 CTR (计数器) 模式下进行 XOR 操作
 	// 将加密好的内容写到dst中
-	if err := internal.XORBlock(dst, data, t.opt.DataKey.Data, iv); err != nil {
+	if err := y.XORBlock(dst, data, t.opt.DataKey.Data, iv); err != nil {
 		return nil, y.Wrapf(err, "while decrypt")
 	}
 	return dst, nil

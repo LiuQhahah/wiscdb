@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/aes"
+	cryptorand "crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
+
 	"github.com/dgraph-io/ristretto/v2/z"
 	"hash/crc32"
 	"io"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -91,6 +94,14 @@ func (vLogFile *writeAheadLog) encodeEntry(buf *bytes.Buffer, e *Entry, offset u
 }
 
 func (vLogFile *writeAheadLog) writeEntry(buf *bytes.Buffer, e *Entry, opt Options) error {
+	buf.Reset()
+	pLen, err := vLogFile.encodeEntry(buf, e, vLogFile.writeAt)
+	if err != nil {
+		return err
+	}
+	y.AssertTrue(pLen == copy(vLogFile.Data[vLogFile.writeAt:], buf.Bytes()))
+	vLogFile.writeAt += uint32(pLen)
+	vLogFile.zeroNextEntry()
 	return nil
 }
 
@@ -98,8 +109,10 @@ func (vLogFile *writeAheadLog) encryptionEnabled() bool {
 	return vLogFile.dataKey != nil
 }
 
+// 为下一个Entry写入做到清扫工作
+// 在预写日志（Write-Ahead Log, WAL）中清零下一个条目的头部区域，以确保后续写入不会读到脏数据或残留数据
 func (vLogFile *writeAheadLog) zeroNextEntry() {
-
+	z.ZeroOut(vLogFile.Data, int(vLogFile.writeAt), int(vLogFile.writeAt+maxHeaderSize))
 }
 
 // IV指的是 Initialization vector
@@ -138,7 +151,37 @@ func (vLogFile *writeAheadLog) doneWriting(offset uint32) error {
 }
 
 func (vLogFile *writeAheadLog) open(path string, flags int, fSize int64) error {
-	return nil
+	mf, ferr := z.OpenMmapFile(path, flags, int(fSize))
+	vLogFile.MmapFile = mf
+
+	// 如果是个新文件,初始化valueLog
+	if ferr == z.NewFile {
+		if err := vLogFile.bootstrap(); err != nil {
+			os.Remove(path)
+			return err
+		}
+		vLogFile.size.Store(vlogHeaderSize)
+	} else if ferr != nil {
+		return y.Wrapf(ferr, "while opening file: %s", path)
+	}
+	vLogFile.size.Store(uint32(len(vLogFile.Data)))
+
+	if vLogFile.size.Load() < vlogHeaderSize {
+		return nil
+	}
+	buf := make([]byte, vlogHeaderSize)
+	y.AssertTruef(vlogHeaderSize == copy(buf, vLogFile.Data), "Unable to copy from %s, size %d", path, vLogFile.size.Load())
+	keyID := binary.BigEndian.Uint64(buf[:8])
+
+	if dk, err := vLogFile.registry.DataKey(keyID); err != nil {
+		return y.Wrapf(err, "While opening vlog file %d", vLogFile.fid)
+	} else {
+		vLogFile.dataKey = dk
+	}
+	vLogFile.baseIV = buf[8:]
+	y.AssertTrue(len(vLogFile.baseIV) == 12)
+
+	return ferr
 }
 
 var errTruncate = errors.New("Do truncate")
@@ -192,8 +235,10 @@ loop:
 		vp.Offset = entryResult.offset
 		vp.Fid = vLogFile.fid
 
+		// go中的switch不需要break如果满足直接执行case中内容，如果不满足才会执行default中操作
 		switch {
 		//如果entry的mete值 第6位有值
+		//	表明是正常的Entry
 		case entryResult.meta&bitTxn > 0:
 			//获取事务提交的时间戳
 			txnTs := y.ParseTs(entryResult.Key)
@@ -210,7 +255,7 @@ loop:
 			vptrs = append(vptrs, vp)
 
 		//如果entry的meta值第7位有值
-		// TODO: 暂时没有找到设置meta的code
+		// 表明是事务的最后一个Entry
 		// 会调用传入的函数fn执行
 		case entryResult.meta&bitFinTxn > 0:
 			txnTs, err := strconv.ParseUint(string(entryResult.Value), 10, 64)
@@ -252,6 +297,26 @@ loop:
 var errStop = errors.New("Stop iteration")
 
 func (vLogFile *writeAheadLog) bootstrap() error {
+	var err error
+	var dk *pb.DataKey
+
+	// 读取最新的DataKey
+	if dk, err = vLogFile.registry.LatestDataKey(); err != nil {
+		return y.Wrapf(err, "Error while retrieving datakey in logFile.bootstarp")
+	}
+	vLogFile.dataKey = dk
+	buf := make([]byte, vlogHeaderSize)
+	binary.BigEndian.PutUint64(buf[:8], vlogHeaderSize)
+	binary.BigEndian.PutUint64(buf[:8], vLogFile.keyID())
+	if _, err := cryptorand.Read(buf[:8]); err != nil {
+		return y.Wrapf(err, "Error while creating base IV, while creating logfile")
+	}
+
+	vLogFile.baseIV = buf[8:]
+	y.AssertTrue(len(vLogFile.baseIV) == 12)
+	y.AssertTrue(vlogHeaderSize == copy(vLogFile.Data[0:], buf))
+
+	vLogFile.zeroNextEntry()
 	return nil
 }
 

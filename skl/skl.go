@@ -69,6 +69,8 @@ func newArena(n int64) *Arena {
 // 它考虑了内存对齐和未使用的空间，确保分配的内存块是有效的。
 // 如果内存不足，函数会触发 panic。
 // 该函数通常用于实现自定义的内存分配器，特别是在需要高效管理内存的场景中（如数据库、缓存系统等）。
+
+// 在 Arena 内存池中分配一个跳表节点（node），并返回其 对齐后的内存偏移量
 func (s *Arena) putNode(height int) uint32 {
 	unusedSize := (maxHeight - height) * offsetSize
 	//本次分配的内存块的大小
@@ -209,7 +211,7 @@ func (s *node) getValueOffset() (uint32, uint32) {
 	return decodeValue(value)
 }
 func (s *node) casNextOffset(h int, old, val uint32) bool {
-	return false
+	return s.tower[h].CompareAndSwap(old, val)
 }
 
 // 获取node总分配区的key，返回值是个字节数组
@@ -356,6 +358,7 @@ func (s *SkipList) Put(key []byte, value y.ValueStruct) {
 	for height > int(listHeight) {
 		//更新下当前跳表的属性：高度
 		//线程安全情况下更新跳表的高度
+		//CAS 失败：其他线程可能已修改高度，需重新获取 listHeight 并重试
 		if s.height.CompareAndSwap(listHeight, int32(height)) {
 			break
 		}
@@ -377,12 +380,17 @@ func (s *SkipList) Put(key []byte, value y.ValueStruct) {
 			nextOffset := s.arena.getNodeOffset(next[i])
 			//将偏移量存储在tower中
 			node1.tower[i].Store(nextOffset)
+			// 插入新节点后要更新prev[i]的值
+			//需要将 prev[i] 的第 i 层指针从原来的 nextOffset（指向 next[i]）改为指向 node1。
+			//同时，node1 的第 i 层指针应指向 next[i]
+			//原子地将 prev[i] 的第 i 层指针从 nextOffset 改为指向 node1。
+			//CAS 失败处理 原因：其他线程可能已修改 prev[i] 的指针
+			//恢复：重新调用 findSpliceForLevel 获取最新的 prev[i] 和 next[i]
 			if prev[i].casNextOffset(i, nextOffset, s.arena.getNodeOffset(node1)) {
 				break
 			}
-
+			//恢复：重新调用 findSpliceForLevel 获取最新的 prev[i] 和 next[i]
 			prev[i], next[i] = s.findSpliceForLevel(key, prev[i], i)
-			// TODO:  这块逻辑没有懂,疑惑：对于没有的key怎么会出现prev[i]与next[i] 相等呢
 			if prev[i] == next[i] {
 				//只能发生在第0层
 				y.AssertTruef(i == 0, "Euality can happend only on base level: %d", i)

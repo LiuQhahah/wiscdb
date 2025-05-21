@@ -561,6 +561,107 @@ const (
 // 会被go goroutine调用作为一个后台一直执行的协程在运行.
 func (db *DB) flushMemTable(lc *z.Closer) {
 	defer lc.Done()
+
+	// 如果channel不为空就会进入到for 循环
+	//函数会一直阻塞在 for mt := range db.flushChan，等待新的 MemTable 刷新任务
+	//Channel 行为
+	//阻塞读取：如果没有数据可读，循环会阻塞等待
+	//
+	//自动终止：只有当 channel 被显式关闭 (close(db.flushChan)) 时循环才会结束
+	//
+	//零值处理：如果 channel 为 nil，循环会永久阻塞
+	//不会执行一次就退出：函数会一直运行，直到 db.flushChan 被显式关闭
+	//range 循环特性：for range 会持续监听 channel，直到它被关闭
+	//消息不丢失：所有通过 db.flushChan <- msg 成功发送的消息都会被 for range 接收到
+	//for range 能可靠接收所有消息的保证源于：
+	//
+	//精心设计的线程安全数据结构
+	//
+	//严格遵循的 happens-before 规则
+	//
+	//运行时调度器的深度配合
+	//
+	//对各种边界条件的完备处理
+	//for range 循环能够可靠接收所有通过 db.flushChan <- msg 发送的消息，这一保证背后是 Go 语言 channel 设计的核心机制。让我们深入分析其工作原理：
+	//Go 的 channel 本质上是一个带锁的环形队列（有缓冲）或同步点（无缓冲），其关键组成：
+	//type hchan struct {
+	//    qcount   uint           // 当前队列中元素数量
+	//    dataqsiz uint           // 环形队列大小
+	//    buf      unsafe.Pointer // 指向环形队列
+	//    sendx    uint           // 发送索引
+	//    recvx    uint           // 接收索引
+	//    lock     mutex          // 互斥锁
+	//    recvq    waitq          // 阻塞的接收者队列
+	//    sendq    waitq          // 阻塞的发送者队列
+	//}
+	//消息传递的原子性保证
+	//当执行 db.flushChan <- msg 时：
+	//
+	//获取锁：首先获取 channel 的互斥锁
+	//
+	//直接交付（fast path）：
+	//
+	//如果已有接收者在等待（recvq 不为空），直接将消息拷贝到接收方
+	//
+	//这是无缓冲 channel 的典型情况
+	//
+	//缓冲写入（有缓冲 channel）：
+	//
+	//如果缓冲区有空位，将消息存入缓冲区并更新索引
+	//
+	//阻塞等待（slow path）：
+	//
+	//无缓冲且无接收者/有缓冲且缓冲区满时
+	//
+	//将当前 goroutine 加入 sendq 队列并挂起
+
+	// for range 的接收保证
+	//for v := range ch 编译后相当于：
+	//
+	//
+	//for v, ok := <-ch; ok; v, ok = <-ch {
+	//    // 循环体
+	//}
+	//接收过程：
+	//
+	//检查 channel 状态：
+	//
+	//如果 channel 已关闭且无数据，结束循环
+	//
+	//直接获取（fast path）：
+	//
+	//如果缓冲区有数据（qcount > 0），直接取出
+	//
+	//如果有发送者在等待（sendq 不为空），直接从发送方获取数据
+	//
+	//阻塞等待（slow path）：
+	//
+	//无数据时，将当前 goroutine 加入 recvq 队列并挂起
+
+	//4. 可靠性的三大支柱
+	//(1) Happens-before 原则
+	//Go 内存模型保证：
+	//
+	//第 n 次发送 happens before 第 n 次接收完成
+	//
+	//Channel 的关闭 happens before 接收端收到零值
+	//
+	//(2) 完全同步的队列管理
+	//所有操作受 mutex 保护
+	//
+	//通过 sudog 结构精确跟踪每个阻塞的 goroutine
+	//
+	//唤醒顺序严格遵循 FIFO
+	//
+	//(3) 运行时调度器的深度集成
+	//当 goroutine 因 channel 操作阻塞时：
+	//
+	//被放入 sendq 或 recvq 队列
+	//
+	//调度器将其 G 结构体从运行队列移除
+	//
+	//当条件满足时，由对方操作将其重新激活
+
 	for mt := range db.flushChan {
 		if mt == nil {
 			continue

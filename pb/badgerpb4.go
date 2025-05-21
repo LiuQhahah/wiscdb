@@ -3,6 +3,7 @@ package pb
 import (
 	"github.com/dgraph-io/ristretto/v2/z"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/runtime/protoimpl"
 	"wiscdb/options"
 )
 
@@ -11,6 +12,21 @@ type DataKey struct {
 	Data     []byte
 	Iv       []byte
 	CreateAt int64
+}
+
+var file_wiscdb_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+
+func (d *DataKey) ProtoReflect() protoreflect.Message {
+
+	mi := &file_wiscdb_proto_msgTypes[5]
+	if protoimpl.UnsafeEnabled && d != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(d))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(d)
 }
 
 type KV struct {
