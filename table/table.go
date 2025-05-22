@@ -48,7 +48,7 @@ type Options struct {
 	tableCapacity        uint64
 	ChkMode              options.ChecksumVerificationMode
 	BloomFalsePositive   float64
-	BlockSize            int         // default 4MB
+	BlockSize            int         // default 4KB
 	DataKey              *pb.DataKey // DataKey的作用: 判断table是否有加密
 	Compression          options.CompressionType
 	BlockCache           *ristretto.Cache[[]byte, *Block]
