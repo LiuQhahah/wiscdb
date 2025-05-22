@@ -418,11 +418,18 @@ const maxAllocatorInitialSz = 256 << 20 // 256MB
 
 func NewTableBuilder(opts Options) *Builder {
 	//default opts.TableSize : 2MB
+	// 申请的空间是目标table的两倍即4MB,如果超过了最大的256MB,则以256为准
 	sz := 2 * int(opts.TableSize)
 	if sz > maxAllocatorInitialSz {
 		sz = maxAllocatorInitialSz
 	}
 	b := &Builder{
+		// Allocator 通过大块分配内存来分摊小块分配的成本。
+		//它在内部使用 z.Calloc 来分配内存。一旦分配完毕，内存就不会移动，
+		//因此可以安全地使用已分配的字节，以不安全的方式将其转换为 Go 结构指针。
+		//维护自由列表的速度很慢。因此，Allocator 只分配内存，最后释放整个 Allocator。
+		// get实则是创建这样的内存区域
+		// 这样做的目的是什么?
 		alloc: opts.AllocPool.Get(sz, "TableBuilder"),
 		opts:  &opts,
 	}
