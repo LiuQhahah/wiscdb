@@ -51,7 +51,7 @@ Structure of Block.
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
 // 将curBlock的信息追加到curBlock
-//如果curBlock 超过了设定的4MB，就会发送给blockChan中
+//如果curBlock 超过了设定的4KB，就会发送给blockChan中
 func (b *Builder) cutDownBlock() {
 
 	if len(b.curBlock.entryOffsets) == 0 {
@@ -129,18 +129,22 @@ func (bd *buildData) Copy(dst []byte) int {
 	return written
 }
 
+// TODO: 表明key-value存储到builder的数据结构
+
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 
 	//将key-value的key进行murmurhash得到key hash写到builder中
+	// keyHashes存储builder所有被hash过的key,包含所有bblock的hash后的key
 	b.keyHashes = append(b.keyHashes, y.Hash(y.ParseKey(key)))
 
+	// maxVersion只有最新的一个,是该builder中所有bblock的key中最大的那个version
 	if version := y.ParseTs(key); version > b.maxVersion {
 		b.maxVersion = version
 	}
 	var diffKey []byte
-	// 将key追加到当前block的baseKey中
-	// 如果curBlock的baseKey为0表明所有的key都是不同的key
 	if len(b.curBlock.baseKey) == 0 {
+		// 将key追加到当前block的baseKey中
+		// 如果curBlock的baseKey为0表明所有的key都是不同的key
 		b.curBlock.baseKey = append(b.curBlock.baseKey[:], key...)
 		diffKey = key
 	} else {
