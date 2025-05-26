@@ -246,17 +246,33 @@ func (b *Builder) CutDoneBuildData() buildData {
 }
 
 func (b *Builder) writeBlockOffsets(builder *fbs.Builder) ([]fbs.UOffsetT, uint32) {
-	return nil, 0
+	var startOffset uint32
+	var uOffs []fbs.UOffsetT
+
+	// 将每一个bblock通过flatbuffer进行序列化.
+	for _, bl := range b.blockList {
+		uOff := b.writeBlockOffset(builder, bl, startOffset)
+		uOffs = append(uOffs, uOff)
+		startOffset += uint32(bl.end)
+	}
+	return uOffs, startOffset
 }
 
 func (b *Builder) writeBlockOffset(builder *fbs.Builder, bl *bblock, startOffset uint32) fbs.UOffsetT {
-	return 0
+	k := builder.CreateByteVector(bl.baseKey)
+
+	fb.BlockOffsetStart(builder)
+	fb.BlockOffsetAddKey(builder, k)
+	fb.BlockOffsetAddOffset(builder, startOffset)
+	fb.BlockOffsetAddLen(builder, uint32(bl.end))
+	return fb.BlockOffsetEnd(builder)
 }
 
 // 构建索引
 func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
 	builder := fbs.NewBuilder(3 << 20) //创建3MB
 	boList, dataSize := b.writeBlockOffsets(builder)
+	//boList为builder中bblock的个数
 	fb.TableIndexStartOffsetsVector(builder, len(boList))
 
 	for i := len(boList) - 1; i >= 0; i-- {
@@ -495,7 +511,7 @@ func (b *Builder) Close() {
 // TODO: bblock的作用是什么？
 type bblock struct {
 	data         []byte
-	baseKey      []byte
+	baseKey      []byte // TODO: baseKey的含义是什么?
 	entryOffsets []uint32
 	end          int
 }
