@@ -676,7 +676,7 @@ func (db *DB) flushMemTable(lc *z.Closer) {
 			//将memTable的内容写到immutable中
 			y.AssertTrue(mt == db.imm[0])
 			//更新immutable
-			// TODO: immutable最后一个变成了什么？
+			// 将immutable[0] 写到L0中,写完一个immutable就break.
 			db.imm = db.imm[1:]
 			mt.DecrRef()
 			db.lock.Unlock()
