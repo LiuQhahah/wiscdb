@@ -54,8 +54,10 @@ func (s *LevelsController) AddLevel0Table(t *table.Table) error {
 		}
 	}
 
+	// 这是for  循环,如果 table数量超过15则一直会循环 然后retry
 	for !s.levels[0].tryAddLevel0Table(t) {
 		timeStart := time.Now()
+		// 如果当前Level0的table数量超过 L0 的15个stall table的数量则休息10毫秒
 		for s.levels[0].numTables() >= s.kv.Opt.NumLevelZeroTablesStall {
 			time.Sleep(10 * time.Millisecond)
 		}
