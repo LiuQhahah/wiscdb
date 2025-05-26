@@ -700,7 +700,9 @@ func (db *DB) handleMemTableFlush(mt *memTable, dropPrefixes [][]byte) error {
 	var tbl *table.Table
 	var err error
 	if db.Opt.InMemory {
+		// 做的事情就是为了内存的数据库
 		data := builder.CutDownBuilder()
+		// 如果是内存的数据库,需要将block memory table中
 		tbl, err = table.OpenInMemoryTable(data, fileID, &bOpts)
 	} else {
 		//创建table

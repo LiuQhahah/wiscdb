@@ -7,6 +7,7 @@ import (
 	"github.com/dgraph-io/ristretto/v2/z"
 	fbs "github.com/google/flatbuffers/go"
 	"github.com/klauspost/compress/s2"
+	"google.golang.org/protobuf/proto"
 	"math"
 	"runtime"
 	"sync"
@@ -34,8 +35,14 @@ type Builder struct {
 }
 
 func (b *Builder) calculateCheckSum(data []byte) []byte {
+	checksum := pb.CheckSum{
+		Sum:  y.CalculateCheckSum(data, pb.CheckSumCRC32C),
+		Algo: pb.CheckSumCRC32C,
+	}
 
-	return nil
+	chkSum, err := proto.Marshal(&checksum)
+	y.Check(err)
+	return chkSum
 }
 
 /*
