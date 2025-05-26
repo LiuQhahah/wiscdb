@@ -7,6 +7,7 @@ import (
 	"github.com/dgraph-io/ristretto/v2/z"
 	fbs "github.com/google/flatbuffers/go"
 	"github.com/klauspost/compress/s2"
+	"google.golang.org/protobuf/proto"
 	"math"
 	"runtime"
 	"sync"
@@ -34,8 +35,14 @@ type Builder struct {
 }
 
 func (b *Builder) calculateCheckSum(data []byte) []byte {
+	checksum := pb.CheckSum{
+		Sum:  y.CalculateCheckSum(data, pb.CheckSumCRC32C),
+		Algo: pb.CheckSumCRC32C,
+	}
 
-	return nil
+	chkSum, err := proto.Marshal(&checksum)
+	y.Check(err)
+	return chkSum
 }
 
 /*
@@ -51,7 +58,7 @@ Structure of Block.
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
 // 将curBlock的信息追加到curBlock
-//如果curBlock 超过了设定的4MB，就会发送给blockChan中
+//如果curBlock 超过了设定的4KB，就会发送给blockChan中
 func (b *Builder) cutDownBlock() {
 
 	if len(b.curBlock.entryOffsets) == 0 {
@@ -129,18 +136,23 @@ func (bd *buildData) Copy(dst []byte) int {
 	return written
 }
 
+// TODO: 表明key-value存储到builder的数据结构
+
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 
 	//将key-value的key进行murmurhash得到key hash写到builder中
+	// keyHashes存储builder所有被hash过的key,包含所有bblock的hash后的key
+	// 5个keyHashes就有5个值.每一个key都用uint32来表示他的hash值
 	b.keyHashes = append(b.keyHashes, y.Hash(y.ParseKey(key)))
 
+	// maxVersion只有最新的一个,是该builder中所有bblock的key中最大的那个version
 	if version := y.ParseTs(key); version > b.maxVersion {
 		b.maxVersion = version
 	}
 	var diffKey []byte
-	// 将key追加到当前block的baseKey中
-	// 如果curBlock的baseKey为0表明所有的key都是不同的key
 	if len(b.curBlock.baseKey) == 0 {
+		// 将key追加到当前block的baseKey中
+		// 如果curBlock的baseKey为0表明所有的key都是不同的key
 		b.curBlock.baseKey = append(b.curBlock.baseKey[:], key...)
 		diffKey = key
 	} else {
@@ -218,6 +230,8 @@ func (b *Builder) CutDoneBuildData() buildData {
 	var f y.Filter
 	//如果误报率大于0，表明开启了布隆过滤器,
 	if b.opts.BloomFalsePositive > 0 {
+		// 调用cutDone方法时,此时已经知道block中的key的数量了,每个block会有不同的key数量
+		// 再结合误报率最终算法需要多个位的哈希函数.
 		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opts.BloomFalsePositive)
 		f = y.NewFilter(b.keyHashes, bits)
 	}
@@ -239,17 +253,33 @@ func (b *Builder) CutDoneBuildData() buildData {
 }
 
 func (b *Builder) writeBlockOffsets(builder *fbs.Builder) ([]fbs.UOffsetT, uint32) {
-	return nil, 0
+	var startOffset uint32
+	var uOffs []fbs.UOffsetT
+
+	// 将每一个bblock通过flatbuffer进行序列化.
+	for _, bl := range b.blockList {
+		uOff := b.writeBlockOffset(builder, bl, startOffset)
+		uOffs = append(uOffs, uOff)
+		startOffset += uint32(bl.end)
+	}
+	return uOffs, startOffset
 }
 
 func (b *Builder) writeBlockOffset(builder *fbs.Builder, bl *bblock, startOffset uint32) fbs.UOffsetT {
-	return 0
+	k := builder.CreateByteVector(bl.baseKey)
+
+	fb.BlockOffsetStart(builder)
+	fb.BlockOffsetAddKey(builder, k)
+	fb.BlockOffsetAddOffset(builder, startOffset)
+	fb.BlockOffsetAddLen(builder, uint32(bl.end))
+	return fb.BlockOffsetEnd(builder)
 }
 
 // 构建索引
 func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
 	builder := fbs.NewBuilder(3 << 20) //创建3MB
 	boList, dataSize := b.writeBlockOffsets(builder)
+	//boList为builder中bblock的个数
 	fb.TableIndexStartOffsetsVector(builder, len(boList))
 
 	for i := len(boList) - 1; i >= 0; i-- {
@@ -488,7 +518,7 @@ func (b *Builder) Close() {
 // TODO: bblock的作用是什么？
 type bblock struct {
 	data         []byte
-	baseKey      []byte
+	baseKey      []byte // TODO: baseKey的含义是什么?
 	entryOffsets []uint32
 	end          int
 }

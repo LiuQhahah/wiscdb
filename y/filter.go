@@ -2,6 +2,10 @@ package y
 
 import "math"
 
+// 布隆过滤器的工作机制
+// 将一个key通过散列函数计算得到N个哈希函数,会在N个位置中设置成1
+// 查询时利用散列函数计算得到N个位置,判断N个位置的bit是否为1,如果为1表明可能存在key,如果为0则肯定不存在.
+
 type Filter []byte
 
 func (f Filter) MayContainKey(key []byte) bool {
@@ -26,28 +30,39 @@ func BloomBitsPerKey(numEntries int, fp float64) int {
 }
 
 func NewFilter(keys []uint32, bitsPerKey int) Filter {
-	return Filter(appendFilter(nil, keys, bitsPerKey))
+	return appendFilter(nil, keys, bitsPerKey)
 }
 
+// 实现了一个布隆过滤器(Bloom Filter)的构建过程，
+// 将一组键(keys)添加到过滤器中，并将结果追加到现有的字节切片(buf)中
 func appendFilter(buf []byte, keys []uint32, bitsPerKey int) []byte {
+	//确保bitsPerKey不小于0
 	if bitsPerKey < 0 {
 		bitsPerKey = 0
 	}
 
+	//使用0.69的系数(ln2的近似值)计算最优哈希函数数量
 	k := uint32(float64(bitsPerKey) * 0.69)
 	if k < 1 {
 		k = 1
 	}
+	//限制k在1到30之间
 	if k > 30 {
 		k = 30
 	}
+
+	//计算所需空间
 	nBits := len(keys) * bitsPerKey
 
+	//确保至少有64位
 	if nBits < 64 {
 		nBits = 64
 	}
+	//计算字节数(向上取整)
 	nBytes := (nBits + 7) / 8
+	//调整nBits为字节对齐
 	nBits = nBytes * 8
+	//使用extend函数扩展缓冲区，多出的1字节用于存储k值
 	buf, filter := extend(buf, nBytes+1)
 	for _, h := range keys {
 		delta := h>>17 | h<<15
@@ -57,25 +72,31 @@ func appendFilter(buf []byte, keys []uint32, bitsPerKey int) []byte {
 			h += delta
 		}
 	}
+	//将k值存储在过滤器末尾
 	filter[nBytes] = uint8(k)
 	return buf
 }
 
 func extend(b []byte, n int) (overall, trailer []byte) {
+	// 检查容量
 	want := n + len(b)
+	// 如果现有容量足够，直接扩展切片
 	if want <= cap(b) {
 		overall = b[:want]
 		trailer = overall[len(b):]
 		for i := range trailer {
+			// 初始化新增部分为0
 			trailer[i] = 0
 		}
 	} else {
 		c := 1024
+		// 按需分配新空间，以25%的增长率扩容
 		for c < want {
 			c += c / 4
 		}
 		overall = make([]byte, want, c)
 		trailer = overall[len(b):]
+		// 复制原有数据并初始化新增部分
 		copy(overall, b)
 	}
 	return overall, trailer

@@ -1,6 +1,9 @@
 package main
 
-import "unsafe"
+import (
+	"encoding/binary"
+	"unsafe"
+)
 
 // 作用
 // 长度指的是entry的key，entry的value，entry的header len以及校验的长度
@@ -15,17 +18,26 @@ type valuePointer struct {
 const vPtrSize = unsafe.Sizeof(valuePointer{})
 
 func (p valuePointer) Less(o valuePointer) bool {
-	return false
+	return p.Fid < o.Fid || p.Offset < o.Offset || p.Len < o.Len
 }
 
 func (p valuePointer) IsZero() bool {
-	return false
+	return p.Len == 0
 }
 
 func (p valuePointer) Encode() []byte {
-	return nil
+	v := make([]byte, vPtrSize)
+	index := binary.PutUvarint(v[0:], uint64(p.Fid))
+	index += binary.PutUvarint(v[index:], uint64(p.Len))
+	index += binary.PutUvarint(v[index:], uint64(p.Offset))
+	return v
 }
 
 func (p *valuePointer) Decode(b []byte) {
-
+	pFid, sz := binary.Uvarint(b[0:])
+	p.Fid = uint32(pFid)
+	pLen, sz1 := binary.Uvarint(b[sz:])
+	p.Len = uint32(pLen)
+	pOffset, _ := binary.Uvarint(b[sz+sz1:])
+	p.Offset = uint32(pOffset)
 }
