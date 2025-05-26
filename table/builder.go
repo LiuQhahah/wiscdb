@@ -135,6 +135,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 
 	//将key-value的key进行murmurhash得到key hash写到builder中
 	// keyHashes存储builder所有被hash过的key,包含所有bblock的hash后的key
+	// 5个keyHashes就有5个值.每一个key都用uint32来表示他的hash值
 	b.keyHashes = append(b.keyHashes, y.Hash(y.ParseKey(key)))
 
 	// maxVersion只有最新的一个,是该builder中所有bblock的key中最大的那个version
@@ -222,6 +223,8 @@ func (b *Builder) CutDoneBuildData() buildData {
 	var f y.Filter
 	//如果误报率大于0，表明开启了布隆过滤器,
 	if b.opts.BloomFalsePositive > 0 {
+		// 调用cutDone方法时,此时已经知道block中的key的数量了,每个block会有不同的key数量
+		// 再结合误报率最终算法需要多个位的哈希函数.
 		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opts.BloomFalsePositive)
 		f = y.NewFilter(b.keyHashes, bits)
 	}
