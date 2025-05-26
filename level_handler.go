@@ -50,8 +50,10 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) error {
 func (s *levelHandler) subtraceSize(t *table.Table) {
 
 }
-func (s *levelHandler) addSize(t *table.Table) {
 
+func (s *levelHandler) addSize(t *table.Table) {
+	s.totalStalSize += int64(t.StaleDataSize())
+	s.totalSize += t.Size()
 }
 
 func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
@@ -77,8 +79,11 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 
 	return true
 }
+
 func (s *levelHandler) numTables() int {
-	return 0
+	s.RLock()
+	defer s.RUnlock()
+	return len(s.tables)
 }
 func (s *levelHandler) close() error {
 	return nil

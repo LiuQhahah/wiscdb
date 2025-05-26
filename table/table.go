@@ -145,6 +145,13 @@ func (t *Table) readNoFail(off, sz int) []byte {
 	y.Check(err)
 	return res
 }
+func (t *Table) Size() int64 {
+	return int64(t.tableSize)
+}
+
+func (t *Table) StaleDataSize() uint32 {
+	return t.fetchIndex().StaleDataSize()
+}
 
 //	biggest 和smallest的作用
 //

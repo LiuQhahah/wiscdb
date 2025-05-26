@@ -63,6 +63,22 @@ const (
 )
 
 type ManifestChangeSet struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+	Changes       []*ManifestChange `protobuf:"bytes,1,rep,name=changes" json:"changes,omitempty"`
+}
+
+func (m *ManifestChangeSet) ProtoReflect() protoreflect.Message {
+	mi := &file_wiscdb_proto_msgTypes[2]
+	if protoimpl.UnsafeEnabled && m != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(m))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(m)
 }
 
 type ManifestChange struct {
