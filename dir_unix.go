@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"wiscdb/y"
 )
 
 type directoryLockGuard struct {
@@ -19,10 +20,19 @@ func (guard *directoryLockGuard) release() error {
 }
 
 func openDir(path string) (*os.File, error) {
-
-	return nil, nil
+	return os.Open(path)
 }
 
 func SyncDir(dir string) error {
-	return nil
+	f, err := openDir(dir)
+	if err != nil {
+		return y.Wrapf(err, "While opening directory: %s.", dir)
+	}
+	err = f.Sync()
+	closeErr := f.Close()
+	if err != nil {
+		return y.Wrapf(err, "While syncing directory: %s.", dir)
+	}
+
+	return y.Wrapf(closeErr, "While closing directory: %s.", dir)
 }

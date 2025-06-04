@@ -41,7 +41,13 @@ func (s *LevelsController) close() error {
 }
 
 func (s *LevelsController) cleanupLevels() error {
-	return nil
+	var firstErr error
+	for _, l := range s.levels {
+		if err := l.close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (s *LevelsController) AddLevel0Table(t *table.Table) error {
@@ -573,6 +579,7 @@ func newLevelsController(db *DB, mf *Manifest) (*LevelsController, error) {
 		default:
 
 		}
+		// 尝试抢占限流器的资源
 		if err := throttle.Do(); err != nil {
 			closeAllTables(tables)
 			return nil, err
@@ -698,5 +705,10 @@ func getIDMap(dir string) map[uint64]struct{} {
 	return idMap
 }
 func (s *LevelsController) validate() error {
+	for _, l := range s.levels {
+		if err := l.validate(); err != nil {
+			y.Wrap(err, "Levels Controller")
+		}
+	}
 	return nil
 }

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
+	"github.com/pkg/errors"
 	"sort"
 	"sync"
 	"wiscdb/table"
@@ -39,8 +41,30 @@ func (s *levelHandler) getTotalSize() int64 {
 	return s.totalSize
 }
 
+// 将 tables添加到levelHandler中
+// 并且对levelController中的数据表按照最小KEY进行排序
 func (s *levelHandler) initTables(tables []*table.Table) {
+	s.Lock()
+	defer s.Unlock()
 
+	s.tables = tables
+	s.totalSize = 0
+	s.totalStalSize = 0
+
+	for _, t := range tables {
+		s.addSize(t)
+	}
+	if s.level == 0 {
+		// L0 按照tableID进行排序
+		sort.Slice(s.tables, func(i, j int) bool {
+			return s.tables[i].ID() < s.tables[j].ID()
+		})
+	} else {
+		// 对这些table按照最小key进行排序
+		sort.Slice(s.tables, func(i, j int) bool {
+			return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
+		})
+	}
 }
 
 func (s *levelHandler) deleteTables(toDel []*table.Table) error {
@@ -86,7 +110,15 @@ func (s *levelHandler) numTables() int {
 	return len(s.tables)
 }
 func (s *levelHandler) close() error {
-	return nil
+	s.RLock()
+	defer s.RUnlock()
+	var err error
+	for _, t := range s.tables {
+		if closeErr := t.Close(-1); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}
+	return y.Wrapf(err, "levelHandler.close")
 }
 
 func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func() error) {
@@ -175,5 +207,33 @@ func (s *levelHandler) overlappingTables(_ levelHandlerRLocked, kr keyRange) (in
 }
 
 func decrRefs(tables []*table.Table) error {
+	return nil
+}
+
+// 验证表和表的边界
+func (s *levelHandler) validate() error {
+	if s.level == 0 {
+		return nil
+	}
+	s.RLock()
+	defer s.RUnlock()
+	numTables := len(s.tables)
+	for j := 1; j <= numTables; j++ {
+		if j >= len(s.tables) {
+			return errors.Errorf("Level %d, j=%d numTables=%d", s.level, j, numTables)
+		}
+
+		// 比较前一个表的最大值要小于后一个表的最小值
+		if y.CompareKeys(s.tables[j-1].Biggest(), s.tables[j].Smallest()) >= 0 {
+			return errors.Errorf(
+				"Inter: Biggest(j-1)[%d] \n%s\n vs Smallest(j)[%d]: \n%s\n: level=%d j=%d numTables=%d", s.tables[j-1].ID(), hex.Dump(s.tables[j-1].Biggest()), s.tables[j].ID(), hex.Dump(s.tables[j].Smallest()), s.level, j, numTables)
+		}
+
+		//当前表的最小值要比当前表的最大值要小
+		if y.CompareKeys(s.tables[j].Smallest(), s.tables[j].Biggest()) > 0 {
+			return errors.Errorf(
+				"Intra: \n%s\n vs \n%s\n: level=%d j=%d numTables=%d", hex.Dump(s.tables[j].Smallest()), hex.Dump(s.tables[j].Biggest()), s.level, j, numTables)
+		}
+	}
 	return nil
 }
