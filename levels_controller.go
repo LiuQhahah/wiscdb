@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/dgraph-io/ristretto/v2/z"
 	otrace "go.opencensus.io/trace"
+	"math"
 	"math/rand"
 	"os"
 	"sort"
@@ -432,7 +433,56 @@ func (s *LevelsController) fillTablesL0(cd *compactDef) bool {
 	return s.fillTablesL0ToL0(cd)
 }
 func (s *LevelsController) fillTablesL0ToL0(cd *compactDef) bool {
-	return false
+	if cd.compactorId != 0 {
+		return false
+	}
+	cd.nextLevel = s.levels[0]
+	cd.nextRange = keyRange{}
+	cd.bot = nil
+	y.AssertTrue(cd.thisLevel.level == 0)
+	y.AssertTrue(cd.nextLevel.level == 0)
+	s.levels[0].RLock()
+	defer s.levels[0].RUnlock()
+
+	s.compactStatus.Lock()
+	defer s.compactStatus.Unlock()
+
+	// 获取该层的table
+	top := cd.thisLevel.tables
+	var out []*table.Table
+	now := time.Now()
+	for _, t := range top {
+		// 如果table尺寸超过就ignore
+		if t.Size() >= 2*cd.t.fileSz[0] {
+			continue
+		}
+		// 如果超过10秒钟还没有被压缩则ignore
+		if now.Sub(t.CreatedAt) < 10*time.Second {
+			continue
+		}
+		// 如果table的状态已经是压缩过了,则ignore
+		if _, beingCompacted := s.compactStatus.tables[t.ID()]; beingCompacted {
+			continue
+		}
+		// 将该table添加到out中
+		out = append(out, t)
+	}
+
+	// 如果out的length小于4则返回false.
+	if len(out) < 4 {
+		return false
+	}
+	cd.thisRange = infRange
+	cd.top = out
+
+	thisLevel := s.compactStatus.levels[cd.thisLevel.level]
+	thisLevel.ranges = append(thisLevel.ranges, infRange)
+	for _, t := range out {
+		s.compactStatus.tables[t.ID()] = struct{}{}
+	}
+	cd.t.fileSz[0] = math.MaxUint32
+
+	return true
 }
 
 func (s *LevelsController) fillTablesL0ToLBase(cd *compactDef) bool {
