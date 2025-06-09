@@ -758,6 +758,12 @@ func BuildTableOptions(db *DB) table.Options {
 	}
 }
 
+func (db *DB) syncDir(dir string) error {
+	if db.Opt.InMemory {
+		return nil
+	}
+	return SyncDir(dir)
+}
 func (db *DB) Get(key []byte) (y.ValueStruct, error) {
 	if db.IsClosed() {
 		return y.ValueStruct{}, ErrDBClosed

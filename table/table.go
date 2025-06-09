@@ -134,6 +134,10 @@ func (t *Table) shouldDecrypt() bool {
 	return t.opt.DataKey != nil
 }
 
+func (t *Table) MaxVersion() uint64 {
+	return t.cheapIndex().MaxVersion
+}
+
 // 从table中读取字节数组,读取的逻辑是按照偏移量+文件尺寸
 func (t *Table) read(off, sz int) ([]byte, error) {
 	return t.Bytes(off, sz)

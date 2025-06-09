@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
 	"math"
 	"wiscdb/table"
 	"wiscdb/y"
@@ -14,25 +16,57 @@ type keyRange struct {
 }
 
 func (r keyRange) isEmpty() bool {
-	return false
+	return len(r.left) == 0 && len(r.right) == 0 && !r.inf
 }
 
 var infRange = keyRange{inf: true}
 
 func (r keyRange) String() string {
-	return ""
+	return fmt.Sprintf("[left=%x, right=%x, inf=%v]", r.left, r.right, r.inf)
 }
 
 func (r keyRange) equals(dst keyRange) bool {
-	return false
+	return bytes.Equal(r.left, dst.left) && bytes.Equal(r.right, dst.right) && r.inf == dst.inf
 }
 
+// 扩大key Range的范围,比如left更小则更新，如果right更大则更新
 func (r *keyRange) extend(kr keyRange) {
-
+	if kr.isEmpty() {
+		return
+	}
+	if r.isEmpty() {
+		*r = kr
+	}
+	if len(r.left) == 0 || y.CompareKeys(kr.left, r.left) < 0 {
+		r.left = kr.left
+	}
+	if len(r.right) == 0 || y.CompareKeys(kr.right, r.right) < 0 {
+		r.right = kr.right
+	}
+	if kr.inf {
+		r.inf = true
+	}
 }
 
+// checks whether two key ranges (r and dst) overlap with each other
+// 判断是否有重叠部分
 func (r keyRange) overlapsWith(dst keyRange) bool {
-	return false
+	if r.isEmpty() {
+		return true
+	}
+	if dst.isEmpty() {
+		return false
+	}
+	if r.inf || dst.inf {
+		return false
+	}
+	if y.CompareKeys(r.left, dst.right) > 0 {
+		return false
+	}
+	if y.CompareKeys(r.right, dst.left) < 0 {
+		return false
+	}
+	return true
 }
 
 // 返回多张表的key返回，主要是最大值与最小值

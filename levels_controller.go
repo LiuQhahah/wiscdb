@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/dgraph-io/ristretto/v2/z"
@@ -368,6 +370,7 @@ func (s *LevelsController) doCompact(id int, p compactionPriority) error {
 	defer s.compactStatus.delete(cd)
 	span.Annotatef(nil, "Compaction: %+v", cd)
 
+	// 执行压缩操作
 	if err := s.runCompactDef(id, l, cd); err != nil {
 		s.kv.Opt.Warningf("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)
 		return err
@@ -377,6 +380,81 @@ func (s *LevelsController) doCompact(id int, p compactionPriority) error {
 }
 
 func (s *LevelsController) runCompactDef(id, l int, cd compactDef) (err error) {
+	if len(cd.t.fileSz) == 0 {
+		return errors.New("FileSizes cannot be zero, Target are not set")
+	}
+	timeStart := time.Now()
+	thisLevel := cd.thisLevel
+	nextLevel := cd.nextLevel
+
+	y.AssertTrue(len(cd.splits) == 0)
+	if thisLevel.level == nextLevel.level {
+		//	Don't do anything for L0->L0 and Lmax->Lmax
+	} else {
+		s.addSplits(&cd)
+	}
+	if len(cd.splits) == 0 {
+		cd.splits = append(cd.splits, keyRange{})
+	}
+
+	newTables, decr, err := s.compactBuildTables(l, cd)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if decErr := decr(); err == nil {
+			err = decErr
+		}
+	}()
+	changeSet := buildChangeSet(&cd, newTables)
+	if err := s.kv.Manifest.AddChanges(changeSet.Changes); err != nil {
+		return err
+	}
+	getSizes := func(tables []*table.Table) int64 {
+		size := int64(0)
+		for _, i := range tables {
+			size += i.Size()
+		}
+		return size
+	}
+
+	sizeNewTables := int64(0)
+	sizeOldTables := int64(0)
+	if s.kv.Opt.MetricsEnabled {
+		sizeNewTables = getSizes(newTables)
+		sizeOldTables = getSizes(cd.bot) + getSizes(cd.top)
+		y.NumBytesCompactionWrittenAdd(s.kv.Opt.MetricsEnabled, nextLevel.strLevel, sizeNewTables)
+	}
+
+	if err := nextLevel.replaceTables(cd.bot, newTables); err != nil {
+		return err
+	}
+
+	if err := thisLevel.deleteTables(cd.top); err != nil {
+		return err
+	}
+
+	from := append(tableToString(cd.top), tableToString(cd.bot)...)
+	to := tableToString(newTables)
+
+	if dur := time.Since(timeStart); dur > 2*time.Second {
+		var expensive string
+		if dur > time.Second {
+			expensive = " [E]"
+		}
+		s.kv.Opt.Infof("[%d]%s LOG Compact %d->%d (%d, %d tables with %d splits). [%s] -> [%s], took %v\n,"+
+			" deleted %d bytes", id, expensive, thisLevel.level, nextLevel.level, len(cd.top),
+			len(cd.bot), len(newTables), len(cd.splits), strings.Join(from, " "),
+			strings.Join(to, " "), dur.Round(time.Millisecond), sizeOldTables-sizeNewTables)
+	}
+
+	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.Opt.LevelSizeMultiplier {
+		s.kv.Opt.Infof("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+			len(cd.top), hex.Dump(cd.thisRange.left), hex.Dump(cd.thisRange.right))
+		s.kv.Opt.Infof("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+			len(cd.bot), hex.Dump(cd.nextRange.left), hex.Dump(cd.nextRange.right))
+	}
+
 	return nil
 }
 
@@ -389,8 +467,87 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeS
 }
 
 func (s *LevelsController) compactBuildTables(lev int, cd compactDef) ([]*table.Table, func() error, error) {
-	return nil, func() error {
-		return nil
+	topTables := cd.top
+	botTables := cd.bot
+
+	numTables := int64(len(topTables) + len(botTables))
+	y.NumCompactionTablesAdd(s.kv.Opt.MetricsEnabled, numTables)
+	defer y.NumCompactionTablesAdd(s.kv.Opt.MetricsEnabled, -numTables)
+
+	cd.span.Annotatef(nil, "Top tables count: %v Bottom tables count: %v", len(topTables), len(botTables))
+
+	keepTable := func(t *table.Table) bool {
+		for _, prefix := range cd.dropPrefixes {
+			if bytes.HasPrefix(t.Smallest(), prefix) && bytes.HasPrefix(t.Biggest(), prefix) {
+				return false
+			}
+		}
+		return false
+	}
+	var valid []*table.Table
+	for _, table := range botTables {
+		if keepTable(table) {
+			valid = append(valid, table)
+		}
+	}
+
+	newIterator := func() []y.Iterator {
+		var iters []y.Iterator
+		switch {
+		case lev == 0:
+			iters = appendIteratorReversed(iters, topTables, table.NOCACHE)
+		case len(topTables) > 0:
+			y.AssertTrue(len(topTables) == 1)
+			iters = []y.Iterator{
+				topTables[0].NewIterator(table.NOCACHE),
+			}
+		}
+
+		return append(iters, table.NewConcatIterator(valid, table.NOCACHE))
+	}
+
+	res := make(chan *table.Table, 3)
+
+	inflightBuilders := y.NewThrottle(8 + len(cd.splits))
+	for _, kr := range cd.splits {
+		if err := inflightBuilders.Do(); err != nil {
+			s.kv.Opt.Errorf("Cannot start subcompaction: %+v", err)
+			return nil, nil, err
+		}
+		go func(kr keyRange) {
+			defer inflightBuilders.Done(nil)
+			it := table.NewMergeIterator(newIterator(), false)
+			defer it.Close()
+			s.subCompact(it, kr, cd, inflightBuilders, res)
+		}(kr)
+	}
+	var newTables []*table.Table
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for t := range res {
+			newTables = append(newTables, t)
+		}
+	}()
+
+	err := inflightBuilders.Finish()
+	close(res)
+	wg.Wait()
+	if err == nil {
+		err = s.kv.syncDir(s.kv.Opt.Dir)
+	}
+
+	if err != nil {
+		_ = decrRefs(newTables)
+		return nil, nil, y.Wrapf(err, "while running compactions for: %+v", cd)
+	}
+
+	sort.Slice(newTables, func(i, j int) bool {
+		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
+	})
+	return newTables, func() error {
+		return decrRefs(newTables)
 	}, nil
 }
 
@@ -405,15 +562,95 @@ func hasAnyPrefixes(s []byte, listOfPrefixes [][]byte) bool {
 func (s *LevelsController) checkOverlap(tables []*table.Table, lev int) bool {
 	return false
 }
-func (s *LevelsController) addSplits(cd *compactDef) {
 
+// 允许执行多个子压缩
+func (s *LevelsController) addSplits(cd *compactDef) {
+	cd.splits = cd.splits[:0]
+	width := int(math.Ceil(float64(len(cd.bot)) / 5.0))
+	if width < 3 {
+		width = 3
+	}
+	skr := cd.thisRange
+	skr.extend(cd.nextRange)
+
+	addRange := func(right []byte) {
+		skr.right = y.Copy(right)
+		cd.splits = append(cd.splits, skr)
+		skr.left = skr.right
+	}
+
+	for i, t := range cd.bot {
+		if i == len(cd.bot)-1 {
+			addRange([]byte{})
+			return
+		}
+		if i%width == width-1 {
+			right := y.KeyWithTs(y.ParseKey(t.Biggest()), 0)
+			addRange(right)
+		}
+	}
 }
+
 func (s *LevelsController) fillTables(cd *compactDef) bool {
+	cd.lockLevels()
+	defer cd.unlockLevels()
+
+	tables := make([]*table.Table, len(cd.thisLevel.tables))
+	// 将cd中的表存放在tables接下来对table进行排序
+	copy(tables, cd.thisLevel.tables)
+
+	if len(tables) == 0 {
+		return false
+	}
+	if cd.thisLevel.isLastLevel() {
+		return s.fillMaxLevelTables(tables, cd)
+	}
+	// 按照table中的最大版本进行排序
+	s.sortByHeuristic(tables, cd)
+
+	for _, t := range tables {
+		cd.thisSize = t.Size()
+		cd.thisRange = getKeyRange(t)
+		if s.compactStatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
+			continue
+		}
+		cd.top = []*table.Table{t}
+		left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, cd.thisRange)
+
+		cd.bot = make([]*table.Table, right-left)
+		copy(cd.bot, cd.nextLevel.tables[left:right])
+
+		if len(cd.bot) == 0 {
+			cd.bot = []*table.Table{}
+			cd.nextRange = cd.thisRange
+			if !s.compactStatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
+				continue
+			}
+			return true
+		}
+		cd.nextRange = getKeyRange(cd.bot...)
+
+		if s.compactStatus.overlapsWith(cd.nextLevel.level, cd.nextRange) {
+			continue
+		}
+		if !s.compactStatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
+			continue
+		}
+		return true
+	}
 	return false
 }
 
+// 启发式:Heuristic
+// 用于根据启发式规则对表进行排序。具体来说，它会按照表的
+// MaxVersion（最大版本号）升序排列表，这样 compaction 操作会优先处理较旧的表。
 func (s *LevelsController) sortByHeuristic(tables []*table.Table, cd *compactDef) {
-
+	if len(tables) == 0 || cd.nextLevel == nil {
+		return
+	}
+	sort.Slice(tables, func(i, j int) bool {
+		return tables[i].MaxVersion() < tables[j].MaxVersion()
+	})
 }
 
 func (s *LevelsController) fillMaxLevelTables(tables []*table.Table, cd *compactDef) bool {

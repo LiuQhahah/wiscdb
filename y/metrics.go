@@ -3,25 +3,34 @@ package y
 import "expvar"
 
 var (
-	numIteratorsCreated *expvar.Int
-	numBytesWrittenUser *expvar.Int
-	numPuts             *expvar.Int
-	numGets             *expvar.Int
-	numMemtableGets     *expvar.Int
-	numGetsWithResults  *expvar.Int
-	pendingWrites       *expvar.Map
-	numBytesWrittenToL0 *expvar.Int
-	numWritesVlog       *expvar.Int
-	numBytesVlogWritten *expvar.Int
-	numLSMBloomHits     *expvar.Map
-	numLSMGets          *expvar.Map
-	numBytesReadLSM     *expvar.Int
+	numIteratorsCreated       *expvar.Int
+	numBytesWrittenUser       *expvar.Int
+	numPuts                   *expvar.Int
+	numGets                   *expvar.Int
+	numMemtableGets           *expvar.Int
+	numGetsWithResults        *expvar.Int
+	pendingWrites             *expvar.Map
+	numBytesWrittenToL0       *expvar.Int
+	numWritesVlog             *expvar.Int
+	numBytesVlogWritten       *expvar.Int
+	numLSMBloomHits           *expvar.Map
+	numLSMGets                *expvar.Map
+	numBytesReadLSM           *expvar.Int
+	numBytesCompactionWritten *expvar.Map
+	numCompactionTables       *expvar.Int
 )
 
 const (
 	BADGER_METRIC_PREFIX = "badger_"
 )
 
+func NumCompactionTablesAdd(enabled bool, val int64) {
+	addInt(enabled, numCompactionTables, val)
+}
+
+func NumBytesCompactionWrittenAdd(enabled bool, key string, val int64) {
+	addToMap(enabled, numBytesCompactionWritten, key, val)
+}
 func init() {
 	numIteratorsCreated = expvar.NewInt(BADGER_METRIC_PREFIX + "iterator_num_user")
 }

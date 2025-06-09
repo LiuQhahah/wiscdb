@@ -23,6 +23,41 @@ type Iterator struct {
 	opt  int
 }
 
+func (itr *Iterator) Next() {
+
+	if itr.opt&REVERSED == 0 {
+		itr.Next()
+	} else {
+		itr.prev()
+	}
+}
+
+func (itr *Iterator) ReWind() {
+
+	if itr.opt&REVERSED == 0 {
+		itr.seekToFirst()
+	} else {
+		itr.seekToLast()
+	}
+}
+
+func NewConcatIterator(tbls []*Table, opt int) *concatIterator {
+	iters := make([]*Iterator, len(tbls))
+	for i := 0; i < len(tbls); i++ {
+		tbls[i].IncrRef()
+	}
+	return &concatIterator{
+		options: opt,
+		iters:   iters,
+		tables:  tbls,
+		idx:     -1,
+	}
+}
+func (itr *Iterator) Value() (ret y.ValueStruct) {
+	ret.Decode(itr.bi.val)
+	return
+}
+
 type blockIterator struct {
 	data         []byte
 	idx          int

@@ -9,7 +9,13 @@ type compactStatus struct {
 }
 
 func (cs *compactStatus) overlapsWith(level int, this keyRange) bool {
-	return false
+	cs.RLock()
+	defer cs.RUnlock()
+
+	// 根据level获取对应的 levelCompactStatus
+	thisLevel := cs.levels[level]
+	// 根据传入的key判断 是否存在重叠的key
+	return thisLevel.overlapsWith(this)
 }
 
 func (cs *compactStatus) delSize(l int) int64 {
