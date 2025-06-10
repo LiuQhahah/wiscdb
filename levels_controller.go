@@ -463,7 +463,20 @@ func tableToString(tables []*table.Table) []string {
 }
 
 func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeSet {
-	return pb.ManifestChangeSet{}
+	changes := []*pb.ManifestChange{}
+	for _, table := range newTables {
+		changes = append(changes, NewCreateChange(table.ID(), cd.nextLevel.level, table.KeyID(), table.CompressionType()))
+	}
+
+	for _, table := range cd.top {
+		if !table.IsInMemory {
+			changes = append(changes, newDeleteChange(table.ID()))
+		}
+	}
+	for _, table := range cd.bot {
+		changes = append(changes, newDeleteChange(table.ID()))
+	}
+	return pb.ManifestChangeSet{Changes: changes}
 }
 
 func (s *LevelsController) compactBuildTables(lev int, cd compactDef) ([]*table.Table, func() error, error) {

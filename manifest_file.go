@@ -75,6 +75,12 @@ func syncFunc(f *os.File) error {
 	return f.Sync()
 }
 
+func newDeleteChange(id uint64) *pb.ManifestChange {
+	return &pb.ManifestChange{
+		Id: id,
+		Op: pb.ManifestChange_DELETE,
+	}
+}
 func NewCreateChange(id uint64, level int, keyID uint64, c options.CompressionType) *pb.ManifestChange {
 	return &pb.ManifestChange{
 		Id:             id,
