@@ -18,14 +18,47 @@ func NewThrottle(max int) *Throttle {
 	}
 }
 
+// 抢占资源
 func (t *Throttle) Do() error {
-	return nil
+	for {
+		select {
+		case t.ch <- struct{}{}:
+			t.wg.Add(1)
+			return nil
+		case err := <-t.errCh:
+			if err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func (t *Throttle) Done(err error) {
+	if err != nil {
+		t.errCh <- err
+	}
+	select {
+	case <-t.ch: // channel中输出一个位置
+	default:
+		panic("Throttle Do Done mismatch")
+	}
+	// 释放一个位置
+	t.wg.Done()
 
 }
 
 func (t *Throttle) Finish() error {
-	return nil
+	t.once.Do(func() {
+		//等待wg 都处于done的状态
+		t.wg.Wait()
+		close(t.ch)
+		close(t.errCh)
+		for err := range t.errCh {
+			if err != nil {
+				t.finishErr = err
+				return
+			}
+		}
+	})
+	return t.finishErr
 }

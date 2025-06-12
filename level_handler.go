@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
+	"github.com/pkg/errors"
 	"sort"
 	"sync"
 	"wiscdb/table"
@@ -39,8 +41,30 @@ func (s *levelHandler) getTotalSize() int64 {
 	return s.totalSize
 }
 
+// 将 tables添加到levelHandler中
+// 并且对levelController中的数据表按照最小KEY进行排序
 func (s *levelHandler) initTables(tables []*table.Table) {
+	s.Lock()
+	defer s.Unlock()
 
+	s.tables = tables
+	s.totalSize = 0
+	s.totalStalSize = 0
+
+	for _, t := range tables {
+		s.addSize(t)
+	}
+	if s.level == 0 {
+		// L0 按照tableID进行排序
+		sort.Slice(s.tables, func(i, j int) bool {
+			return s.tables[i].ID() < s.tables[j].ID()
+		})
+	} else {
+		// 对这些table按照最小key进行排序
+		sort.Slice(s.tables, func(i, j int) bool {
+			return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
+		})
+	}
 }
 
 func (s *levelHandler) deleteTables(toDel []*table.Table) error {
@@ -56,8 +80,43 @@ func (s *levelHandler) addSize(t *table.Table) {
 	s.totalSize += t.Size()
 }
 
+// 第一个参数指的是要删除的table list,第二个参数指的是要添加的table list
 func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
-	return nil
+	s.Lock()
+	toDelMap := make(map[uint64]struct{})
+	for _, t := range toDel {
+		toDelMap[t.ID()] = struct{}{}
+	}
+	var newTables []*table.Table
+	// 遍历当前level的table
+	for _, t := range s.tables {
+		// 获取过那些table属于delete map
+		_, found := toDelMap[t.ID()]
+		// 如果没有找到
+		if !found {
+			// 则将level 中的table当作new tables
+			newTables = append(newTables, t)
+			continue
+		}
+		s.subtraceSize(t)
+	}
+	// 遍历toAdd的table并且将newTables中再加上toAdd中的table
+	for _, t := range toAdd {
+		s.addSize(t)
+		t.IncrRef()
+		newTables = append(newTables, t)
+	}
+
+	// 将最新的table更新到该level中
+	s.tables = newTables
+	// 同时对table进行排序
+	sort.Slice(s.tables, func(i, j int) bool {
+		return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
+	})
+	s.Unlock()
+
+	//
+	return decrRefs(toDel)
 }
 func (s *levelHandler) addTable(t *table.Table) {
 
@@ -86,7 +145,15 @@ func (s *levelHandler) numTables() int {
 	return len(s.tables)
 }
 func (s *levelHandler) close() error {
-	return nil
+	s.RLock()
+	defer s.RUnlock()
+	var err error
+	for _, t := range s.tables {
+		if closeErr := t.Close(-1); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}
+	return y.Wrapf(err, "levelHandler.close")
 }
 
 func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func() error) {
@@ -170,10 +237,53 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 	return maxVs, decr()
 }
 
-func (s *levelHandler) overlappingTables(_ levelHandlerRLocked, kr keyRange) (int, int) {
-	return 0, 0
+// 传入keyRange
+// 将keyRange的最左侧和最右侧与level的table的最大值进行比较
+// 偏移量left和right指的是压缩范围
+func (s *levelHandler) overlappingTables(_ levelHandlerRLocked, kr keyRange) (left int, right int) {
+	if len(kr.left) == 0 || len(kr.right) == 0 {
+		return 0, 0
+	}
+	// 原则table中左右是互不重叠.
+	// 左移直到知道比最小值小的table
+	left = sort.Search(len(s.tables), func(i int) bool {
+		return y.CompareKeys(kr.left, s.tables[i].Biggest()) <= 0
+	})
+	//右移直到找到，比最大值大的table i
+	right = sort.Search(len(s.tables), func(i int) bool {
+		return y.CompareKeys(kr.right, s.tables[i].Smallest()) < 0
+	})
+	return
 }
 
 func decrRefs(tables []*table.Table) error {
+	return nil
+}
+
+// 验证表和表的边界
+func (s *levelHandler) validate() error {
+	if s.level == 0 {
+		return nil
+	}
+	s.RLock()
+	defer s.RUnlock()
+	numTables := len(s.tables)
+	for j := 1; j <= numTables; j++ {
+		if j >= len(s.tables) {
+			return errors.Errorf("Level %d, j=%d numTables=%d", s.level, j, numTables)
+		}
+
+		// 比较前一个表的最大值要小于后一个表的最小值
+		if y.CompareKeys(s.tables[j-1].Biggest(), s.tables[j].Smallest()) >= 0 {
+			return errors.Errorf(
+				"Inter: Biggest(j-1)[%d] \n%s\n vs Smallest(j)[%d]: \n%s\n: level=%d j=%d numTables=%d", s.tables[j-1].ID(), hex.Dump(s.tables[j-1].Biggest()), s.tables[j].ID(), hex.Dump(s.tables[j].Smallest()), s.level, j, numTables)
+		}
+
+		//当前表的最小值要比当前表的最大值要小
+		if y.CompareKeys(s.tables[j].Smallest(), s.tables[j].Biggest()) > 0 {
+			return errors.Errorf(
+				"Intra: \n%s\n vs \n%s\n: level=%d j=%d numTables=%d", hex.Dump(s.tables[j].Smallest()), hex.Dump(s.tables[j].Biggest()), s.level, j, numTables)
+		}
+	}
 	return nil
 }
