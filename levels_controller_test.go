@@ -382,7 +382,7 @@ func TestLevelsController_compactBuildTables(t *testing.T) {
 				t.Errorf("compactBuildTables() got = %v, want %v", got, tt.want)
 			}
 			if !reflect.DeepEqual(got1, tt.want1) {
-				t.Errorf("compactBuildTables() got1 = %v, want %v", got1, tt.want1)
+				t.Errorf("compactBuildTables()  ")
 			}
 		})
 	}

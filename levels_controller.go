@@ -426,6 +426,7 @@ func (s *LevelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 		y.NumBytesCompactionWrittenAdd(s.kv.Opt.MetricsEnabled, nextLevel.strLevel, sizeNewTables)
 	}
 
+	// cd.bot是要变成被delete的table
 	if err := nextLevel.replaceTables(cd.bot, newTables); err != nil {
 		return err
 	}
@@ -751,12 +752,21 @@ func (s *LevelsController) fillTablesL0ToLBase(cd *compactDef) bool {
 		return false
 	}
 	var out []*table.Table
+	// 昨晚下面的函数会得到该level的table的最小key和最大key
+	// 组成keyRange struct
 	if len(cd.dropPrefixes) > 0 {
 		out = top
 	} else {
 		var kr keyRange
+		//  遍历top的所有table list
 		for _, t := range top {
+			// 得到table中的key范围
+			// 即得到table的最小的key和最大的key
 			dkr := getKeyRange(t)
+			// 将当前的table的最大值和最小值与当前level的最大值和最小值进行比较
+			// 同时更新当前层的最小key和最大key
+			// 如果kr的的最小最大值范围在dkr的最小最大值范围内
+			// 那么就扩展将这张表的最小值和最大值扩展到当前level的最小值和最大值的KeyRange中
 			if kr.overlapsWith(dkr) {
 				out = append(out, t)
 				kr.extend(dkr)
@@ -765,18 +775,25 @@ func (s *LevelsController) fillTablesL0ToLBase(cd *compactDef) bool {
 			}
 		}
 	}
+	// 重新得到key range
 	cd.thisRange = getKeyRange(out...)
 	cd.top = out
 
+	// 将下一层的key与当前层的最小key和最大key进行比较
+	// 返回上一层与下一层的重叠交叉的key
 	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, cd.thisRange)
 	cd.bot = make([]*table.Table, right-left)
+	// 更新bottom的table list
+	// 将交叉的key当作压缩的底，
 	copy(cd.bot, cd.nextLevel.tables[left:right])
 
 	if len(cd.bot) == 0 {
 		cd.nextRange = cd.thisRange
 	} else {
+		// 更细next range的值为下一层的key-rang
 		cd.nextRange = getKeyRange(cd.bot...)
 	}
+	// 压缩并添加
 	return s.compactStatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd)
 }
 
