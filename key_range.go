@@ -9,8 +9,8 @@ import (
 )
 
 type keyRange struct {
-	left  []byte
-	right []byte
+	left  []byte // TODO: left的作用
+	right []byte // TODO: right 的作用
 	inf   bool
 	size  int64
 }
@@ -78,6 +78,9 @@ func getKeyRange(tables ...*table.Table) keyRange {
 	smallest := tables[0].Smallest()
 	biggest := tables[0].Biggest()
 	//遍历N张表
+	// 如何得到一组树中的最大值和最小值?
+	// 时间复杂度是O(n)
+	// TODO: 优化使用时间复杂度更低的算法
 	for i := 1; i < len(tables); i++ {
 		if y.CompareKeys(tables[i].Smallest(), smallest) < 0 {
 			smallest = tables[i].Smallest()

@@ -383,7 +383,11 @@ func TestLevelsController_compactBuildTables(t *testing.T) {
 				t.Errorf("compactBuildTables() got = , error")
 			}
 			if !reflect.DeepEqual(got1, tt.want1) {
+<<<<<<< HEAD
 				t.Errorf("compactBuildTables() got1 , error ")
+=======
+				t.Errorf("compactBuildTables()  ")
+>>>>>>> 7b82b2531169929cf5769ecb7c10f35cf44a2800
 			}
 		})
 	}

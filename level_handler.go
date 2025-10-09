@@ -80,8 +80,43 @@ func (s *levelHandler) addSize(t *table.Table) {
 	s.totalSize += t.Size()
 }
 
+// 第一个参数指的是要删除的table list,第二个参数指的是要添加的table list
 func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
-	return nil
+	s.Lock()
+	toDelMap := make(map[uint64]struct{})
+	for _, t := range toDel {
+		toDelMap[t.ID()] = struct{}{}
+	}
+	var newTables []*table.Table
+	// 遍历当前level的table
+	for _, t := range s.tables {
+		// 获取过那些table属于delete map
+		_, found := toDelMap[t.ID()]
+		// 如果没有找到
+		if !found {
+			// 则将level 中的table当作new tables
+			newTables = append(newTables, t)
+			continue
+		}
+		s.subtraceSize(t)
+	}
+	// 遍历toAdd的table并且将newTables中再加上toAdd中的table
+	for _, t := range toAdd {
+		s.addSize(t)
+		t.IncrRef()
+		newTables = append(newTables, t)
+	}
+
+	// 将最新的table更新到该level中
+	s.tables = newTables
+	// 同时对table进行排序
+	sort.Slice(s.tables, func(i, j int) bool {
+		return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
+	})
+	s.Unlock()
+
+	//
+	return decrRefs(toDel)
 }
 func (s *levelHandler) addTable(t *table.Table) {
 
@@ -202,8 +237,23 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 	return maxVs, decr()
 }
 
-func (s *levelHandler) overlappingTables(_ levelHandlerRLocked, kr keyRange) (int, int) {
-	return 0, 0
+// 传入keyRange
+// 将keyRange的最左侧和最右侧与level的table的最大值进行比较
+// 偏移量left和right指的是压缩范围
+func (s *levelHandler) overlappingTables(_ levelHandlerRLocked, kr keyRange) (left int, right int) {
+	if len(kr.left) == 0 || len(kr.right) == 0 {
+		return 0, 0
+	}
+	// 原则table中左右是互不重叠.
+	// 左移直到知道比最小值小的table
+	left = sort.Search(len(s.tables), func(i int) bool {
+		return y.CompareKeys(kr.left, s.tables[i].Biggest()) <= 0
+	})
+	//右移直到找到，比最大值大的table i
+	right = sort.Search(len(s.tables), func(i int) bool {
+		return y.CompareKeys(kr.right, s.tables[i].Smallest()) < 0
+	})
+	return
 }
 
 func decrRefs(tables []*table.Table) error {
