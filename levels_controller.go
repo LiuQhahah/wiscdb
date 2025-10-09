@@ -6,8 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/dgraph-io/ristretto/v2/z"
-	otrace "go.opencensus.io/trace"
 	"math"
 	"math/rand"
 	"os"
@@ -19,6 +17,9 @@ import (
 	"wiscdb/pb"
 	"wiscdb/table"
 	"wiscdb/y"
+
+	"github.com/dgraph-io/ristretto/v2/z"
+	otrace "go.opencensus.io/trace"
 )
 
 type LevelsController struct {
