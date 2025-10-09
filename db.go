@@ -5,8 +5,6 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
-	"github.com/dgraph-io/ristretto/v2"
-	"github.com/dgraph-io/ristretto/v2/z"
 	"math"
 	"os"
 	"path/filepath"
@@ -17,6 +15,9 @@ import (
 	"wiscdb/skl"
 	"wiscdb/table"
 	"wiscdb/y"
+
+	"github.com/dgraph-io/ristretto/v2"
+	"github.com/dgraph-io/ristretto/v2/z"
 )
 
 var (

@@ -1,13 +1,14 @@
 package main
 
 import (
-	"github.com/dgraph-io/ristretto/v2/z"
 	"reflect"
 	"sync/atomic"
 	"testing"
 	"wiscdb/pb"
 	"wiscdb/table"
 	"wiscdb/y"
+
+	"github.com/dgraph-io/ristretto/v2/z"
 )
 
 func TestHasAnyPrefixes(t *testing.T) {
@@ -379,10 +380,14 @@ func TestLevelsController_compactBuildTables(t *testing.T) {
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("compactBuildTables() got = %v, want %v", got, tt.want)
+				t.Errorf("compactBuildTables() got = , error")
 			}
 			if !reflect.DeepEqual(got1, tt.want1) {
+<<<<<<< HEAD
+				t.Errorf("compactBuildTables() got1 , error ")
+=======
 				t.Errorf("compactBuildTables()  ")
+>>>>>>> 7b82b2531169929cf5769ecb7c10f35cf44a2800
 			}
 		})
 	}
@@ -706,25 +711,41 @@ func TestLevelsController_levelTargets(t *testing.T) {
 		kv            *DB
 		compactStatus compactStatus
 	}
+	opt := &Options{
+		MaxLevels:     7,
+		BaseTableSize: 64 << 20,
+		BaseLevelSize: 10 << 20,
+	}
+
+	db := &DB{
+		Opt: *opt,
+	}
 	tests := []struct {
 		name   string
 		fields fields
 		want   targets
 	}{
 		{
-			name:   "test",
-			fields: fields{},
+			name: "test",
+			fields: fields{
+				kv: &DB{
+					Opt: *opt,
+				},
+				// levels: 7,
+			},
 		},
 	}
+	mf := &Manifest{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &LevelsController{
-				nextFileID:    tt.fields.nextFileID,
-				l0stallMs:     tt.fields.l0stallMs,
-				levels:        tt.fields.levels,
-				kv:            tt.fields.kv,
-				compactStatus: tt.fields.compactStatus,
-			}
+			s, _ := newLevelsController(db, mf)
+			// s := &LevelsController{
+			// 	nextFileID:    tt.fields.nextFileID,
+			// 	l0stallMs:     tt.fields.l0stallMs,
+			// 	levels:        tt.fields.levels,
+			// 	kv:            tt.fields.kv,
+			// 	compactStatus: tt.fields.compactStatus,
+			// }
 			if got := s.levelTargets(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("levelTargets() = %v, want %v", got, tt.want)
 			}

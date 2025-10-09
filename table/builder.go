@@ -4,10 +4,6 @@ import (
 	"crypto/aes"
 	"encoding/binary"
 	"errors"
-	"github.com/dgraph-io/ristretto/v2/z"
-	fbs "github.com/google/flatbuffers/go"
-	"github.com/klauspost/compress/s2"
-	"google.golang.org/protobuf/proto"
 	"math"
 	"runtime"
 	"sync"
@@ -16,6 +12,11 @@ import (
 	"wiscdb/options"
 	"wiscdb/pb"
 	"wiscdb/y"
+
+	"github.com/dgraph-io/ristretto/v2/z"
+	fbs "github.com/google/flatbuffers/go"
+	"github.com/klauspost/compress/s2"
+	"google.golang.org/protobuf/proto"
 )
 
 type Builder struct {
